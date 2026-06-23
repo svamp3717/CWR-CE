@@ -1,4 +1,4 @@
-name: PCH Check
+name: C++ / PCH
 
 on:
   schedule:
