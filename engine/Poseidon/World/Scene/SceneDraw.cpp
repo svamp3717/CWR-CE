@@ -54,6 +54,7 @@ using Poseidon::Foundation::Time;
 #include <time.h>
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
 #include <Poseidon/World/Terrain/Occlusion.hpp>
+#include <Poseidon/World/Terrain/TerrainProfile.hpp>
 
 using namespace Poseidon;
 
@@ -1283,8 +1284,11 @@ static void DrawSortObject(SortObject* oi)
 
 void Scene::DrawObjectsAndShadowsPass1()
 {
+    const auto pass1T0 = TerrainProfile::Now();
+
     // select first objects - those with highest visual priority
 
+    const auto compactT0 = TerrainProfile::Now();
     int s = 0, t = 0;
     for (; s < _drawObjects.Size(); s++)
     {
@@ -1303,6 +1307,8 @@ void Scene::DrawObjectsAndShadowsPass1()
         }
     }
     _drawObjects.Resize(t);
+    GTerrainProfile.pass1CompactCycles += TerrainProfile::Now() - compactT0;
+    GTerrainProfile.pass1Objects += _drawObjects.Size();
 
 #if DO_STAT
     Alpha.Clear();
@@ -1312,11 +1318,15 @@ void Scene::DrawObjectsAndShadowsPass1()
 
     // remove all objects that should not be used
 
+    const auto complexityT0 = TerrainProfile::Now();
     AdjustComplexity();
+    GTerrainProfile.pass1ComplexityCycles += TerrainProfile::Now() - complexityT0;
 
     // copy objects to working list (mergers)
     // do not copy objects that are not drawn
     {
+        const auto buildMergersT0 = TerrainProfile::Now();
+
         // make smaller only when really necessary
         int objNeed = _drawObjects.Size();
         int objHave = _drawMergers.MaxSize();
@@ -1343,6 +1353,9 @@ void Scene::DrawObjectsAndShadowsPass1()
             }
             _drawMergers.Add(sObj);
         }
+
+        GTerrainProfile.pass1BuildMergersCycles += TerrainProfile::Now() - buildMergersT0;
+        GTerrainProfile.pass1Mergers += _drawMergers.Size();
     }
     // One-shot shape census (perf campaign): triPerfDumpShapes arms this;
     // the next Pass1 logs the top repeated shapes — the instancing-candidate
@@ -1385,6 +1398,8 @@ void Scene::DrawObjectsAndShadowsPass1()
 
     if (EnableObjOcc)
     {
+        const auto occlusionT0 = TerrainProfile::Now();
+
         // sort only what needs to checked/drawn for occlusion
         // this will remove especially cloudlets from occlusion testing
         // it also helps to maintain _drawMergers sorted
@@ -1511,13 +1526,20 @@ void Scene::DrawObjectsAndShadowsPass1()
                 oi->drawLOD = LOD_INVISIBLE;
             }
         }
+
+        GTerrainProfile.pass1OcclusionCycles += TerrainProfile::Now() - occlusionT0;
     }
 
+    const auto sortT0 = TerrainProfile::Now();
     QSort(_drawMergers.Data(), _drawMergers.Size(), CmpShapeObj);
+    GTerrainProfile.pass1SortCycles += TerrainProfile::Now() - sortT0;
+
     // first of all draw non-alpha objects
 
 #if DRAW_OBJS
     {
+        const auto drawT0 = TerrainProfile::Now();
+
         // Instanced runs (perf effort 08): _drawMergers is shape-sorted, so
         // identical static shapes arrive contiguously. A batchable run draws
         // the head once inside Begin/EndInstancedRun — every TL section then
@@ -1588,24 +1610,38 @@ void Scene::DrawObjectsAndShadowsPass1()
             GSectionFilter = SectionClassFilter::OpaqueAndCutout;
             if (headBatchable && runLen >= 4)
             {
+                const auto instancedT0 = TerrainProfile::Now();
+
                 GEngine->BeginInstancedRunUpload();
                 DrawSortObject(oi);
                 if (!GEngine->EndInstancedRun())
                 {
                     // Vertex-soup sections can't instance — those drew only for the
                     // head; redraw the rest scalar (TL overdraw is z-equal opaque).
+                    const auto scalarFallbackT0 = TerrainProfile::Now();
                     for (int k = i + 1; k < runEnd; k++)
                     {
                         DrawSortObject(_drawMergers[k]);
                     }
+                    GTerrainProfile.pass1DrawScalarCycles += TerrainProfile::Now() - scalarFallbackT0;
+                    GTerrainProfile.pass1ScalarObjects += runLen - 1;
                 }
+
+                GTerrainProfile.pass1DrawInstancedCycles += TerrainProfile::Now() - instancedT0;
+                GTerrainProfile.pass1InstancedRuns++;
+                GTerrainProfile.pass1InstancedObjects += runLen;
             }
             else
             {
+                const auto scalarT0 = TerrainProfile::Now();
+
                 for (int k = i; k < runEnd; k++)
                 {
                     DrawSortObject(_drawMergers[k]);
                 }
+
+                GTerrainProfile.pass1DrawScalarCycles += TerrainProfile::Now() - scalarT0;
+                GTerrainProfile.pass1ScalarObjects += runLen;
             }
             GSectionFilter = SectionClassFilter::All;
 #if DO_STAT
@@ -1613,6 +1649,40 @@ void Scene::DrawObjectsAndShadowsPass1()
 #endif
             i = runEnd;
         }
+
+        GTerrainProfile.pass1DrawCycles += TerrainProfile::Now() - drawT0;
+    }
+#endif
+
+    GTerrainProfile.pass1TotalCycles += TerrainProfile::Now() - pass1T0;
+
+#if _ENABLE_CHEATS
+    static int pass1LogFrame = 0;
+    if (++pass1LogFrame >= 120)
+    {
+        pass1LogFrame = 0;
+
+        const double total = GTerrainProfile.pass1TotalCycles;
+        const double invTotal = total > 0 ? 100.0 / total : 0.0;
+
+        LOG_INFO(Graphics,
+                 "PERF lnd:obj pass1 cycles: total {:.0f}, compact {:.1f}%, complexity {:.1f}%, mergers {:.1f}%, "
+                 "occlusion {:.1f}%, sort {:.1f}%, draw {:.1f}%, scalar {:.1f}%, instanced {:.1f}% | "
+                 "objs {}, mergers {}, scalarObjs {}, instRuns {}, instObjs {}",
+                 total,
+                 GTerrainProfile.pass1CompactCycles * invTotal,
+                 GTerrainProfile.pass1ComplexityCycles * invTotal,
+                 GTerrainProfile.pass1BuildMergersCycles * invTotal,
+                 GTerrainProfile.pass1OcclusionCycles * invTotal,
+                 GTerrainProfile.pass1SortCycles * invTotal,
+                 GTerrainProfile.pass1DrawCycles * invTotal,
+                 GTerrainProfile.pass1DrawScalarCycles * invTotal,
+                 GTerrainProfile.pass1DrawInstancedCycles * invTotal,
+                 GTerrainProfile.pass1Objects,
+                 GTerrainProfile.pass1Mergers,
+                 GTerrainProfile.pass1ScalarObjects,
+                 GTerrainProfile.pass1InstancedRuns,
+                 GTerrainProfile.pass1InstancedObjects);
     }
 #endif
 }
