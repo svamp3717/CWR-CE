@@ -20,6 +20,23 @@ struct TerrainProfile {
     int cacheSearchSteps;
     double drawGroundCycles;
     double generateSegCycles;
+    // Scene::DrawObjectsAndShadowsPass1 breakdown, feeds the lnd:obj investigation.
+    double pass1TotalCycles;
+    double pass1CompactCycles;
+    double pass1ComplexityCycles;
+    double pass1BuildMergersCycles;
+    double pass1OcclusionCycles;
+    double pass1SortCycles;
+    double pass1DrawCycles;
+    double pass1DrawScalarCycles;
+    double pass1DrawInstancedCycles;
+
+    int pass1Objects;
+    int pass1Mergers;
+    int pass1ScalarObjects;
+    int pass1InstancedRuns;
+    int pass1InstancedObjects;
+
 
     void Reset() { *this = {}; }
 
