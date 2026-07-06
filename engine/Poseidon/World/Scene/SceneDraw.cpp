@@ -1571,14 +1571,36 @@ void Scene::DrawObjectsAndShadowsPass1()
                 continue;
             }
 
+            GTerrainProfile.pass1BatchCandidateRuns++;
+
             int runEnd = i + 1;
             const int headSpecial = sShape->Special() | oi->object->GetObjSpecial();
             const render::LegacySpec headSpec = render::SplitLegacy(headSpecial);
-            const bool headBatchable = noLocalLights && oi->object->Static() && sShape->NProxies() == 0 &&
-                                       !render::Has(headSpec.routing, render::Routing::OnSurface) &&
-                                       !render::Has(headSpec.routing, render::Routing::IsColored) &&
-                                       oi->object != GWorld->CameraOn();
-            if (headBatchable)
+            const bool rejectLocalLights = !noLocalLights;
+            const bool rejectNotStatic = !oi->object->Static();
+            const bool rejectProxy = sShape->NProxies() != 0;
+            const bool rejectOnSurface = render::Has(headSpec.routing, render::Routing::OnSurface);
+            const bool rejectColored = render::Has(headSpec.routing, render::Routing::IsColored);
+            const bool rejectCamera = oi->object == GWorld->CameraOn();
+            const bool headBatchable = !rejectLocalLights && !rejectNotStatic && !rejectProxy && !rejectOnSurface &&
+                                       !rejectColored && !rejectCamera;
+            if (!headBatchable)
+            {
+                GTerrainProfile.pass1BatchRejectHeadNotBatchable++;
+                if (rejectLocalLights)
+                    GTerrainProfile.pass1BatchRejectLocalLights++;
+                if (rejectNotStatic)
+                    GTerrainProfile.pass1BatchRejectNotStatic++;
+                if (rejectProxy)
+                    GTerrainProfile.pass1BatchRejectProxy++;
+                if (rejectOnSurface)
+                    GTerrainProfile.pass1BatchRejectOnSurface++;
+                if (rejectColored)
+                    GTerrainProfile.pass1BatchRejectColored++;
+                if (rejectCamera)
+                    GTerrainProfile.pass1BatchRejectCamera++;
+            }
+            else
             {
                 GEngine->InstancedRunReset();
                 if (GEngine->InstancedRunAdd(oi->object->Transform()))
@@ -1590,19 +1612,42 @@ void Scene::DrawObjectsAndShadowsPass1()
                     while (runEnd < _drawMergers.Size())
                     {
                         SortObject* oj = _drawMergers[runEnd];
-                        if (oj->object->GetShape() != shape || oj->drawLOD != oi->drawLOD ||
-                            oj->passNum != oi->passNum || !oj->object->Static() ||
-                            (sShape->Special() | oj->object->GetObjSpecial()) != headSpecial || oj->distance2 < d2lo ||
-                            oj->distance2 > d2hi)
+                        if (oj->object->GetShape() != shape || oj->drawLOD != oi->drawLOD)
                         {
+                            GTerrainProfile.pass1BatchBreakShapeOrLodMismatch++;
+                            break;
+                        }
+                        if (oj->passNum != oi->passNum)
+                        {
+                            GTerrainProfile.pass1BatchBreakPassMismatch++;
+                            break;
+                        }
+                        if (!oj->object->Static())
+                        {
+                            GTerrainProfile.pass1BatchBreakNotStatic++;
+                            break;
+                        }
+                        if ((sShape->Special() | oj->object->GetObjSpecial()) != headSpecial)
+                        {
+                            GTerrainProfile.pass1BatchBreakSpecialMismatch++;
+                            break;
+                        }
+                        if (oj->distance2 < d2lo || oj->distance2 > d2hi)
+                        {
+                            GTerrainProfile.pass1BatchBreakDistanceBand++;
                             break;
                         }
                         if (!GEngine->InstancedRunAdd(oj->object->Transform()))
                         {
+                            GTerrainProfile.pass1BatchBreakEngineLimit++;
                             break;
                         }
                         runEnd++;
                     }
+                }
+                else
+                {
+                    GTerrainProfile.pass1BatchBreakEngineLimit++;
                 }
             }
 
@@ -1614,8 +1659,10 @@ void Scene::DrawObjectsAndShadowsPass1()
 
                 GEngine->BeginInstancedRunUpload();
                 DrawSortObject(oi);
-                if (!GEngine->EndInstancedRun())
+                const bool instancedOk = GEngine->EndInstancedRun();
+                if (!instancedOk)
                 {
+                    GTerrainProfile.pass1BatchEndFailed++;
                     // Vertex-soup sections can't instance — those drew only for the
                     // head; redraw the rest scalar (TL overdraw is z-equal opaque).
                     const auto scalarFallbackT0 = TerrainProfile::Now();
@@ -1626,13 +1673,23 @@ void Scene::DrawObjectsAndShadowsPass1()
                     GTerrainProfile.pass1DrawScalarCycles += TerrainProfile::Now() - scalarFallbackT0;
                     GTerrainProfile.pass1ScalarObjects += runLen - 1;
                 }
+                else
+                {
+                    GTerrainProfile.pass1InstancedRuns++;
+                    GTerrainProfile.pass1InstancedObjects += runLen;
+                    GTerrainProfile.pass1BatchAcceptedRuns++;
+                    GTerrainProfile.pass1BatchAcceptedObjects += runLen;
+                }
 
                 GTerrainProfile.pass1DrawInstancedCycles += TerrainProfile::Now() - instancedT0;
-                GTerrainProfile.pass1InstancedRuns++;
-                GTerrainProfile.pass1InstancedObjects += runLen;
             }
             else
             {
+                if (headBatchable)
+                {
+                    GTerrainProfile.pass1BatchRejectUnderThreshold++;
+                }
+
                 const auto scalarT0 = TerrainProfile::Now();
 
                 for (int k = i; k < runEnd; k++)
@@ -1656,34 +1713,80 @@ void Scene::DrawObjectsAndShadowsPass1()
 
     GTerrainProfile.pass1TotalCycles += TerrainProfile::Now() - pass1T0;
 
-if (AppConfig::Instance().DevMode())
+    if (AppConfig::Instance().DevMode())
     {
         static int pass1LogFrame = 0;
         if (++pass1LogFrame >= 120)
         {
             pass1LogFrame = 0;
 
-            const double total = GTerrainProfile.pass1TotalCycles;
+            static TerrainProfile previousLog = {};
+            auto deltaDouble = [](double current, double& previous) {
+                const double delta = current >= previous ? current - previous : current;
+                previous = current;
+                return delta;
+            };
+            auto deltaInt = [](int current, int& previous) {
+                const int delta = current >= previous ? current - previous : current;
+                previous = current;
+                return delta;
+            };
+
+            const double total = deltaDouble(GTerrainProfile.pass1TotalCycles, previousLog.pass1TotalCycles);
+            const double compact = deltaDouble(GTerrainProfile.pass1CompactCycles, previousLog.pass1CompactCycles);
+            const double complexity = deltaDouble(GTerrainProfile.pass1ComplexityCycles, previousLog.pass1ComplexityCycles);
+            const double mergers = deltaDouble(GTerrainProfile.pass1BuildMergersCycles, previousLog.pass1BuildMergersCycles);
+            const double occlusion = deltaDouble(GTerrainProfile.pass1OcclusionCycles, previousLog.pass1OcclusionCycles);
+            const double sort = deltaDouble(GTerrainProfile.pass1SortCycles, previousLog.pass1SortCycles);
+            const double draw = deltaDouble(GTerrainProfile.pass1DrawCycles, previousLog.pass1DrawCycles);
+            const double scalar = deltaDouble(GTerrainProfile.pass1DrawScalarCycles, previousLog.pass1DrawScalarCycles);
+            const double instanced = deltaDouble(GTerrainProfile.pass1DrawInstancedCycles, previousLog.pass1DrawInstancedCycles);
+
+            const int objects = deltaInt(GTerrainProfile.pass1Objects, previousLog.pass1Objects);
+            const int mergerObjects = deltaInt(GTerrainProfile.pass1Mergers, previousLog.pass1Mergers);
+            const int scalarObjects = deltaInt(GTerrainProfile.pass1ScalarObjects, previousLog.pass1ScalarObjects);
+            const int instancedRuns = deltaInt(GTerrainProfile.pass1InstancedRuns, previousLog.pass1InstancedRuns);
+            const int instancedObjects = deltaInt(GTerrainProfile.pass1InstancedObjects, previousLog.pass1InstancedObjects);
+
+            const int candidateRuns = deltaInt(GTerrainProfile.pass1BatchCandidateRuns, previousLog.pass1BatchCandidateRuns);
+            const int acceptedRuns = deltaInt(GTerrainProfile.pass1BatchAcceptedRuns, previousLog.pass1BatchAcceptedRuns);
+            const int acceptedObjects = deltaInt(GTerrainProfile.pass1BatchAcceptedObjects, previousLog.pass1BatchAcceptedObjects);
+            const int underThreshold = deltaInt(GTerrainProfile.pass1BatchRejectUnderThreshold, previousLog.pass1BatchRejectUnderThreshold);
+            const int headRejected = deltaInt(GTerrainProfile.pass1BatchRejectHeadNotBatchable, previousLog.pass1BatchRejectHeadNotBatchable);
+            const int rejectLocalLights = deltaInt(GTerrainProfile.pass1BatchRejectLocalLights, previousLog.pass1BatchRejectLocalLights);
+            const int rejectNotStatic = deltaInt(GTerrainProfile.pass1BatchRejectNotStatic, previousLog.pass1BatchRejectNotStatic);
+            const int rejectProxy = deltaInt(GTerrainProfile.pass1BatchRejectProxy, previousLog.pass1BatchRejectProxy);
+            const int rejectOnSurface = deltaInt(GTerrainProfile.pass1BatchRejectOnSurface, previousLog.pass1BatchRejectOnSurface);
+            const int rejectColored = deltaInt(GTerrainProfile.pass1BatchRejectColored, previousLog.pass1BatchRejectColored);
+            const int rejectCamera = deltaInt(GTerrainProfile.pass1BatchRejectCamera, previousLog.pass1BatchRejectCamera);
+            const int breakShapeOrLod = deltaInt(GTerrainProfile.pass1BatchBreakShapeOrLodMismatch,
+                                                 previousLog.pass1BatchBreakShapeOrLodMismatch);
+            const int breakPass = deltaInt(GTerrainProfile.pass1BatchBreakPassMismatch, previousLog.pass1BatchBreakPassMismatch);
+            const int breakNotStatic = deltaInt(GTerrainProfile.pass1BatchBreakNotStatic, previousLog.pass1BatchBreakNotStatic);
+            const int breakSpecial = deltaInt(GTerrainProfile.pass1BatchBreakSpecialMismatch,
+                                              previousLog.pass1BatchBreakSpecialMismatch);
+            const int breakDistance = deltaInt(GTerrainProfile.pass1BatchBreakDistanceBand,
+                                               previousLog.pass1BatchBreakDistanceBand);
+            const int breakEngineLimit = deltaInt(GTerrainProfile.pass1BatchBreakEngineLimit,
+                                                  previousLog.pass1BatchBreakEngineLimit);
+            const int endFailed = deltaInt(GTerrainProfile.pass1BatchEndFailed, previousLog.pass1BatchEndFailed);
+
             const double invTotal = total > 0 ? 100.0 / total : 0.0;
 
             LOG_INFO(Graphics,
-                     "PERF lnd:obj pass1 cycles: total {:.0f}, compact {:.1f}%, complexity {:.1f}%, mergers {:.1f}%, "
+                     "PERF lnd:obj pass1 delta cycles: total {:.0f}, compact {:.1f}%, complexity {:.1f}%, mergers {:.1f}%, "
                      "occlusion {:.1f}%, sort {:.1f}%, draw {:.1f}%, scalar {:.1f}%, instanced {:.1f}% | "
                      "objs {}, mergers {}, scalarObjs {}, instRuns {}, instObjs {}",
-                     total,
-                     GTerrainProfile.pass1CompactCycles * invTotal,
-                     GTerrainProfile.pass1ComplexityCycles * invTotal,
-                     GTerrainProfile.pass1BuildMergersCycles * invTotal,
-                     GTerrainProfile.pass1OcclusionCycles * invTotal,
-                     GTerrainProfile.pass1SortCycles * invTotal,
-                     GTerrainProfile.pass1DrawCycles * invTotal,
-                     GTerrainProfile.pass1DrawScalarCycles * invTotal,
-                     GTerrainProfile.pass1DrawInstancedCycles * invTotal,
-                     GTerrainProfile.pass1Objects,
-                     GTerrainProfile.pass1Mergers,
-                     GTerrainProfile.pass1ScalarObjects,
-                     GTerrainProfile.pass1InstancedRuns,
-                     GTerrainProfile.pass1InstancedObjects);
+                     total, compact * invTotal, complexity * invTotal, mergers * invTotal, occlusion * invTotal,
+                     sort * invTotal, draw * invTotal, scalar * invTotal, instanced * invTotal, objects, mergerObjects,
+                     scalarObjects, instancedRuns, instancedObjects);
+            LOG_INFO(Graphics,
+                     "PERF lnd:obj instancing delta: candidates {}, accepted {} objs {}, underThreshold {}, "
+                     "headReject {} [lights {}, static {}, proxy {}, surface {}, colored {}, camera {}], "
+                     "breaks [shapeLod {}, pass {}, static {}, special {}, distance {}, engineLimit {}, endFail {}]",
+                     candidateRuns, acceptedRuns, acceptedObjects, underThreshold, headRejected, rejectLocalLights,
+                     rejectNotStatic, rejectProxy, rejectOnSurface, rejectColored, rejectCamera, breakShapeOrLod,
+                     breakPass, breakNotStatic, breakSpecial, breakDistance, breakEngineLimit, endFailed);
         }
     }
 }
