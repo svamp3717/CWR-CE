@@ -1286,6 +1286,11 @@ void Scene::DrawObjectsAndShadowsPass1()
 {
     const auto pass1T0 = TerrainProfile::Now();
 
+    // Diagnostic only: collect the top shapes rejected by the OnSurface routing flag.
+    // This does not change rendering behavior; it tells us what to test next.
+    static std::map<std::string, int> pass1OnSurfaceRejectShapes;
+    static int pass1OnSurfaceRejectTotal = 0;
+
     // select first objects - those with highest visual priority
 
     const auto compactT0 = TerrainProfile::Now();
@@ -1598,7 +1603,15 @@ void Scene::DrawObjectsAndShadowsPass1()
                 if (rejectProxy)
                     GTerrainProfile.pass1BatchRejectProxy++;
                 if (rejectOnSurface)
+                {
                     GTerrainProfile.pass1BatchRejectOnSurface++;
+                    if (AppConfig::Instance().DevMode())
+                    {
+                        const char* surfaceShapeName = shape ? (const char*)shape->GetName() : "<null shape>";
+                        pass1OnSurfaceRejectShapes[std::string(surfaceShapeName)]++;
+                        pass1OnSurfaceRejectTotal++;
+                    }
+                }
                 if (rejectColored)
                     GTerrainProfile.pass1BatchRejectColored++;
                 if (rejectCamera)
@@ -1787,12 +1800,38 @@ void Scene::DrawObjectsAndShadowsPass1()
                      sort * invTotal, draw * invTotal, scalar * invTotal, instanced * invTotal, objects, mergerObjects,
                      scalarObjects, instancedRuns, instancedObjects);
             LOG_INFO(Graphics,
-                     "PERF lnd:obj instancing delta CANDIDATE_LIGHTS_BAND75_125_T4: candidates {}, accepted {} objs {}, underThreshold {}, "
+                     "PERF lnd:obj instancing delta CANDIDATE_LIGHTS_BAND75_125_T4_SURFACE_DIAG: candidates {}, accepted {} objs {}, underThreshold {}, "
                      "headReject {} [lights {}, static {}, proxy {}, surface {}, colored {}, camera {}], "
                      "breaks [shapeLod {}, pass {}, static {}, special {}, distance {}, engineLimit {}, endFail {}]",
                      candidateRuns, acceptedRuns, acceptedObjects, underThreshold, headRejected, rejectLocalLights,
                      rejectNotStatic, rejectProxy, rejectOnSurface, rejectColored, rejectCamera, breakShapeOrLod,
                      breakPass, breakNotStatic, breakSpecial, breakDistance, breakEngineLimit, endFailed);
+
+            if (pass1OnSurfaceRejectTotal > 0)
+            {
+                std::vector<std::pair<int, std::string>> topSurfaceRejects;
+                topSurfaceRejects.reserve(pass1OnSurfaceRejectShapes.size());
+                for (const auto& kv : pass1OnSurfaceRejectShapes)
+                {
+                    topSurfaceRejects.push_back({kv.second, kv.first});
+                }
+                std::sort(topSurfaceRejects.rbegin(), topSurfaceRejects.rend());
+
+                LOG_INFO(Graphics,
+                         "PERF lnd:obj OnSurface rejects CANDIDATE_LIGHTS_BAND75_125_T4_SURFACE_DIAG: total {}, unique {}",
+                         pass1OnSurfaceRejectTotal, (int)pass1OnSurfaceRejectShapes.size());
+
+                for (size_t surfaceIdx = 0; surfaceIdx < topSurfaceRejects.size() && surfaceIdx < 12; surfaceIdx++)
+                {
+                    LOG_INFO(Graphics,
+                             "PERF lnd:obj OnSurface reject[{}]: {} x{}",
+                             (int)surfaceIdx, topSurfaceRejects[surfaceIdx].second.c_str(),
+                             topSurfaceRejects[surfaceIdx].first);
+                }
+
+                pass1OnSurfaceRejectShapes.clear();
+                pass1OnSurfaceRejectTotal = 0;
+            }
         }
     }
 }
