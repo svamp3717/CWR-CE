@@ -1611,10 +1611,8 @@ void Scene::DrawObjectsAndShadowsPass1()
                 {
                     // Fog band: keep members within ~5% of the head's distance so
                     // the head's per-object constant fog approximates all of them.
-                    // TEST ONLY: widen the fog/distance band.
-                    // Baseline was 0.90..1.10. Watch for fog/haze mismatch on batched objects.
-                    const float d2lo = oi->distance2 * 0.75f;
-                    const float d2hi = oi->distance2 * 1.25f;
+                    const float d2lo = oi->distance2 * 0.90f;
+                    const float d2hi = oi->distance2 * 1.10f;
                     while (runEnd < _drawMergers.Size())
                     {
                         SortObject* oj = _drawMergers[runEnd];
@@ -1659,7 +1657,9 @@ void Scene::DrawObjectsAndShadowsPass1()
 
             const int runLen = runEnd - i;
             GSectionFilter = SectionClassFilter::OpaqueAndCutout;
-            if (headBatchable && runLen >= 4)
+            // TEST ONLY: lower minimum instanced run length.
+            // Baseline was >= 4. Watch for whether smaller batches help or add overhead.
+            if (headBatchable && runLen >= 3)
             {
                 const auto instancedT0 = TerrainProfile::Now();
 
@@ -1787,7 +1787,7 @@ void Scene::DrawObjectsAndShadowsPass1()
                      sort * invTotal, draw * invTotal, scalar * invTotal, instanced * invTotal, objects, mergerObjects,
                      scalarObjects, instancedRuns, instancedObjects);
             LOG_INFO(Graphics,
-                     "PERF lnd:obj instancing delta TEST_BAND75_125: candidates {}, accepted {} objs {}, underThreshold {}, "
+                     "PERF lnd:obj instancing delta TEST_T3: candidates {}, accepted {} objs {}, underThreshold {}, "
                      "headReject {} [lights {}, static {}, proxy {}, surface {}, colored {}, camera {}], "
                      "breaks [shapeLod {}, pass {}, static {}, special {}, distance {}, engineLimit {}, endFail {}]",
                      candidateRuns, acceptedRuns, acceptedObjects, underThreshold, headRejected, rejectLocalLights,
