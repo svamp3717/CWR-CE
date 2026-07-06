@@ -1548,7 +1548,11 @@ void Scene::DrawObjectsAndShadowsPass1()
         // not OnSurface/IsColored, equal obj-special, no local lights in the
         // scene, and a tight distance band so the head's constant-fog value
         // is representative for the whole batch.
-        const bool noLocalLights = NLights() == 0;
+        // TEST ONLY: allow instancing even when local lights exist.
+        // The previous global rule rejected every candidate run whenever NLights() > 0,
+        // which made the instancing path impossible to exercise in normal scenes.
+        constexpr bool AllowInstancingWithLocalLightsForPerfTest = true;
+        const bool noLocalLights = AllowInstancingWithLocalLightsForPerfTest || NLights() == 0;
         for (int i = 0; i < _drawMergers.Size();)
         {
             SortObject* oi = _drawMergers[i];
@@ -1781,7 +1785,7 @@ void Scene::DrawObjectsAndShadowsPass1()
                      sort * invTotal, draw * invTotal, scalar * invTotal, instanced * invTotal, objects, mergerObjects,
                      scalarObjects, instancedRuns, instancedObjects);
             LOG_INFO(Graphics,
-                     "PERF lnd:obj instancing delta: candidates {}, accepted {} objs {}, underThreshold {}, "
+                     "PERF lnd:obj instancing delta TEST_LIGHTS: candidates {}, accepted {} objs {}, underThreshold {}, "
                      "headReject {} [lights {}, static {}, proxy {}, surface {}, colored {}, camera {}], "
                      "breaks [shapeLod {}, pass {}, static {}, special {}, distance {}, engineLimit {}, endFail {}]",
                      candidateRuns, acceptedRuns, acceptedObjects, underThreshold, headRejected, rejectLocalLights,
