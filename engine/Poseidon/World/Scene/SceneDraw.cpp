@@ -1611,8 +1611,10 @@ void Scene::DrawObjectsAndShadowsPass1()
                 {
                     // Fog band: keep members within ~5% of the head's distance so
                     // the head's per-object constant fog approximates all of them.
-                    const float d2lo = oi->distance2 * 0.90f;
-                    const float d2hi = oi->distance2 * 1.10f;
+                    // TEST ONLY: widen the fog/distance band.
+                    // Baseline was 0.90..1.10. Watch for fog/haze mismatch on batched objects.
+                    const float d2lo = oi->distance2 * 0.75f;
+                    const float d2hi = oi->distance2 * 1.25f;
                     while (runEnd < _drawMergers.Size())
                     {
                         SortObject* oj = _drawMergers[runEnd];
@@ -1785,7 +1787,7 @@ void Scene::DrawObjectsAndShadowsPass1()
                      sort * invTotal, draw * invTotal, scalar * invTotal, instanced * invTotal, objects, mergerObjects,
                      scalarObjects, instancedRuns, instancedObjects);
             LOG_INFO(Graphics,
-                     "PERF lnd:obj instancing delta TEST_LIGHTS: candidates {}, accepted {} objs {}, underThreshold {}, "
+                     "PERF lnd:obj instancing delta TEST_BAND75_125: candidates {}, accepted {} objs {}, underThreshold {}, "
                      "headReject {} [lights {}, static {}, proxy {}, surface {}, colored {}, camera {}], "
                      "breaks [shapeLod {}, pass {}, static {}, special {}, distance {}, engineLimit {}, endFail {}]",
                      candidateRuns, acceptedRuns, acceptedObjects, underThreshold, headRejected, rejectLocalLights,
