@@ -750,8 +750,8 @@ inline void CheckMinMaxIter(Vector3& min, Vector3& max, Vector3Par val)
     else if (max[2] < val[2])
     {
         max[2] = val[2];
+        }
     }
-#endif
 }
 
 static bool FarEnoughForOcclusion(const SortObject* oi)
@@ -1656,8 +1656,9 @@ void Scene::DrawObjectsAndShadowsPass1()
 
     GTerrainProfile.pass1TotalCycles += TerrainProfile::Now() - pass1T0;
 
-#if _ENABLE_CHEATS
-    static int pass1LogFrame = 0;
+    if (AppConfig::Instance().DevMode())
+    {
+        static int pass1LogFrame = 0;
     if (++pass1LogFrame >= 120)
     {
         pass1LogFrame = 0;
