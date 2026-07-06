@@ -37,6 +37,26 @@ struct TerrainProfile {
     int pass1InstancedRuns;
     int pass1InstancedObjects;
 
+    // Instancing diagnostics. These explain why the lnd:obj path falls back to scalar drawing.
+    int pass1BatchCandidateRuns;
+    int pass1BatchAcceptedRuns;
+    int pass1BatchAcceptedObjects;
+    int pass1BatchRejectUnderThreshold;
+    int pass1BatchRejectHeadNotBatchable;
+    int pass1BatchRejectLocalLights;
+    int pass1BatchRejectNotStatic;
+    int pass1BatchRejectProxy;
+    int pass1BatchRejectOnSurface;
+    int pass1BatchRejectColored;
+    int pass1BatchRejectCamera;
+    int pass1BatchBreakShapeOrLodMismatch;
+    int pass1BatchBreakPassMismatch;
+    int pass1BatchBreakNotStatic;
+    int pass1BatchBreakSpecialMismatch;
+    int pass1BatchBreakDistanceBand;
+    int pass1BatchBreakEngineLimit;
+    int pass1BatchEndFailed;
+
 
     void Reset() { *this = {}; }
 
