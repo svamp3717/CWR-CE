@@ -750,8 +750,8 @@ inline void CheckMinMaxIter(Vector3& min, Vector3& max, Vector3Par val)
     else if (max[2] < val[2])
     {
         max[2] = val[2];
-        }
     }
+#endif
 }
 
 static bool FarEnoughForOcclusion(const SortObject* oi)
@@ -1656,36 +1656,36 @@ void Scene::DrawObjectsAndShadowsPass1()
 
     GTerrainProfile.pass1TotalCycles += TerrainProfile::Now() - pass1T0;
 
-    if (AppConfig::Instance().DevMode())
+if (AppConfig::Instance().DevMode())
     {
         static int pass1LogFrame = 0;
-    if (++pass1LogFrame >= 120)
-    {
-        pass1LogFrame = 0;
+        if (++pass1LogFrame >= 120)
+        {
+            pass1LogFrame = 0;
 
-        const double total = GTerrainProfile.pass1TotalCycles;
-        const double invTotal = total > 0 ? 100.0 / total : 0.0;
+            const double total = GTerrainProfile.pass1TotalCycles;
+            const double invTotal = total > 0 ? 100.0 / total : 0.0;
 
-        LOG_INFO(Graphics,
-                 "PERF lnd:obj pass1 cycles: total {:.0f}, compact {:.1f}%, complexity {:.1f}%, mergers {:.1f}%, "
-                 "occlusion {:.1f}%, sort {:.1f}%, draw {:.1f}%, scalar {:.1f}%, instanced {:.1f}% | "
-                 "objs {}, mergers {}, scalarObjs {}, instRuns {}, instObjs {}",
-                 total,
-                 GTerrainProfile.pass1CompactCycles * invTotal,
-                 GTerrainProfile.pass1ComplexityCycles * invTotal,
-                 GTerrainProfile.pass1BuildMergersCycles * invTotal,
-                 GTerrainProfile.pass1OcclusionCycles * invTotal,
-                 GTerrainProfile.pass1SortCycles * invTotal,
-                 GTerrainProfile.pass1DrawCycles * invTotal,
-                 GTerrainProfile.pass1DrawScalarCycles * invTotal,
-                 GTerrainProfile.pass1DrawInstancedCycles * invTotal,
-                 GTerrainProfile.pass1Objects,
-                 GTerrainProfile.pass1Mergers,
-                 GTerrainProfile.pass1ScalarObjects,
-                 GTerrainProfile.pass1InstancedRuns,
-                 GTerrainProfile.pass1InstancedObjects);
+            LOG_INFO(Graphics,
+                     "PERF lnd:obj pass1 cycles: total {:.0f}, compact {:.1f}%, complexity {:.1f}%, mergers {:.1f}%, "
+                     "occlusion {:.1f}%, sort {:.1f}%, draw {:.1f}%, scalar {:.1f}%, instanced {:.1f}% | "
+                     "objs {}, mergers {}, scalarObjs {}, instRuns {}, instObjs {}",
+                     total,
+                     GTerrainProfile.pass1CompactCycles * invTotal,
+                     GTerrainProfile.pass1ComplexityCycles * invTotal,
+                     GTerrainProfile.pass1BuildMergersCycles * invTotal,
+                     GTerrainProfile.pass1OcclusionCycles * invTotal,
+                     GTerrainProfile.pass1SortCycles * invTotal,
+                     GTerrainProfile.pass1DrawCycles * invTotal,
+                     GTerrainProfile.pass1DrawScalarCycles * invTotal,
+                     GTerrainProfile.pass1DrawInstancedCycles * invTotal,
+                     GTerrainProfile.pass1Objects,
+                     GTerrainProfile.pass1Mergers,
+                     GTerrainProfile.pass1ScalarObjects,
+                     GTerrainProfile.pass1InstancedRuns,
+                     GTerrainProfile.pass1InstancedObjects);
+        }
     }
-#endif
 }
 
 // A surface overlay (road / decal): OnSurface-routed geometry drawn as a
