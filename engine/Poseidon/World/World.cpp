@@ -1676,10 +1676,16 @@ void World::Simulate(float deltaT, bool& enableDraw)
 #else
         PerformAI(deltaT, noAccDeltaT);
 #endif
+    }
+
+    perf.Mark(Dev::FrameProfiler::PhaseAi);
+
+    if (doSim)
+    {
         SimulateAllVehicles(deltaT, noAccDeltaT, camVehicle);
     }
 
-    perf.Mark(Dev::FrameProfiler::PhaseAiVehicles);
+    perf.Mark(Dev::FrameProfiler::PhaseVehicles);
 
     if (IsSimulationEnabled())
     {
