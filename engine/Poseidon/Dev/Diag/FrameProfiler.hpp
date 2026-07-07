@@ -28,7 +28,8 @@ class FrameProfiler
         PhaseDrawObjects,  // object + shadow passes, queue flush, frame observe
         PhaseDrawPost,     // cuts/effects, alternate draw paths, cleanup
         PhaseHud,          // UI, titles, FinishDraw
-        PhaseAiVehicles,   // PerformAI + SimulateAllVehicles
+        PhaseAi,           // PerformAI / background AI finish
+        PhaseVehicles,     // SimulateAllVehicles
         PhaseSound,        // PerformSound + AdvanceAll + Commit
         PhaseSwap,         // NextFrame (resolve + present)
         PhaseCount,
@@ -40,7 +41,7 @@ class FrameProfiler
     static const char* PhaseName(int p)
     {
         static const char* kNames[PhaseCount] = {"setup",    "drw:init", "drw:prep", "land:gnd", "land:obj", "drw:land", "drw:obj",
-                                                 "drw:post", "hud",      "ai+veh",   "sound",    "swap"};
+                                                 "drw:post", "hud",      "ai",       "veh",      "sound",    "swap"};
         return (p >= 0 && p < PhaseCount) ? kNames[p] : "?";
     }
 
