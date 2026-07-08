@@ -439,6 +439,10 @@ void World::PerformAI(float deltaT, float noAccDeltaT)
         float aiDetailGlobalRadioMs = 0.0f;
         float aiDetailCenterRadioMs = 0.0f;
         float aiDetailCenterThinkMs = 0.0f;
+        float aiDetailEastCenterThinkMs = 0.0f;
+        float aiDetailWestCenterThinkMs = 0.0f;
+        float aiDetailGuerrilaCenterThinkMs = 0.0f;
+        float aiDetailCivilianCenterThinkMs = 0.0f;
         float aiDetailGroupRadioMs = 0.0f;
         float aiDetailLogicMs = 0.0f;
         float aiDetailMissionMs = 0.0f;
@@ -457,7 +461,7 @@ void World::PerformAI(float deltaT, float noAccDeltaT)
             GetRadio().Simulate(deltaT);
         }
 
-        auto aiDetailSimulateCenter = [&](AICenter* center)
+        auto aiDetailSimulateCenter = [&](AICenter* center, float& centerThinkBucketMs)
         {
             if (!center)
             {
@@ -474,9 +478,11 @@ void World::PerformAI(float deltaT, float noAccDeltaT)
 
                 t0 = std::chrono::steady_clock::now();
                 center->Think();
-                aiDetailCenterThinkMs += std::chrono::duration<float, std::milli>(
-                                            std::chrono::steady_clock::now() - t0)
-                                            .count();
+                const float centerThinkMs = std::chrono::duration<float, std::milli>(
+                                                std::chrono::steady_clock::now() - t0)
+                                                .count();
+                aiDetailCenterThinkMs += centerThinkMs;
+                centerThinkBucketMs += centerThinkMs;
 
                 t0 = std::chrono::steady_clock::now();
                 int i;
@@ -510,10 +516,10 @@ void World::PerformAI(float deltaT, float noAccDeltaT)
             }
         };
 
-        aiDetailSimulateCenter(_eastCenter);
-        aiDetailSimulateCenter(_westCenter);
-        aiDetailSimulateCenter(_guerrilaCenter);
-        aiDetailSimulateCenter(_civilianCenter);
+        aiDetailSimulateCenter(_eastCenter, aiDetailEastCenterThinkMs);
+        aiDetailSimulateCenter(_westCenter, aiDetailWestCenterThinkMs);
+        aiDetailSimulateCenter(_guerrilaCenter, aiDetailGuerrilaCenterThinkMs);
+        aiDetailSimulateCenter(_civilianCenter, aiDetailCivilianCenterThinkMs);
 
         if (_logicCenter)
         {
@@ -710,6 +716,10 @@ void World::PerformAI(float deltaT, float noAccDeltaT)
             static float aiDetailSumGlobalRadioMs = 0.0f;
             static float aiDetailSumCenterRadioMs = 0.0f;
             static float aiDetailSumCenterThinkMs = 0.0f;
+            static float aiDetailSumEastCenterThinkMs = 0.0f;
+            static float aiDetailSumWestCenterThinkMs = 0.0f;
+            static float aiDetailSumGuerrilaCenterThinkMs = 0.0f;
+            static float aiDetailSumCivilianCenterThinkMs = 0.0f;
             static float aiDetailSumGroupRadioMs = 0.0f;
             static float aiDetailSumLogicMs = 0.0f;
             static float aiDetailSumMissionMs = 0.0f;
@@ -719,6 +729,10 @@ void World::PerformAI(float deltaT, float noAccDeltaT)
             aiDetailSumGlobalRadioMs += aiDetailGlobalRadioMs;
             aiDetailSumCenterRadioMs += aiDetailCenterRadioMs;
             aiDetailSumCenterThinkMs += aiDetailCenterThinkMs;
+            aiDetailSumEastCenterThinkMs += aiDetailEastCenterThinkMs;
+            aiDetailSumWestCenterThinkMs += aiDetailWestCenterThinkMs;
+            aiDetailSumGuerrilaCenterThinkMs += aiDetailGuerrilaCenterThinkMs;
+            aiDetailSumCivilianCenterThinkMs += aiDetailCivilianCenterThinkMs;
             aiDetailSumGroupRadioMs += aiDetailGroupRadioMs;
             aiDetailSumLogicMs += aiDetailLogicMs;
             aiDetailSumMissionMs += aiDetailMissionMs;
@@ -728,10 +742,14 @@ void World::PerformAI(float deltaT, float noAccDeltaT)
             {
                 const float invFrames = 1.0f / aiDetailFrames;
                 LOG_INFO(World,
-                         "PERF ai detail: globalRadio {:.3f}ms, centerRadio {:.3f}ms, centerThink {:.3f}ms, groupRadio {:.3f}ms, logic {:.3f}ms, mission {:.3f}ms | avg groups {}",
+                         "PERF ai detail: globalRadio {:.3f}ms, centerRadio {:.3f}ms, centerThink {:.3f}ms [east {:.3f}, west {:.3f}, guerrila {:.3f}, civilian {:.3f}], groupRadio {:.3f}ms, logic {:.3f}ms, mission {:.3f}ms | avg groups {}",
                          aiDetailSumGlobalRadioMs * invFrames,
                          aiDetailSumCenterRadioMs * invFrames,
                          aiDetailSumCenterThinkMs * invFrames,
+                         aiDetailSumEastCenterThinkMs * invFrames,
+                         aiDetailSumWestCenterThinkMs * invFrames,
+                         aiDetailSumGuerrilaCenterThinkMs * invFrames,
+                         aiDetailSumCivilianCenterThinkMs * invFrames,
                          aiDetailSumGroupRadioMs * invFrames,
                          aiDetailSumLogicMs * invFrames,
                          aiDetailSumMissionMs * invFrames,
@@ -741,6 +759,10 @@ void World::PerformAI(float deltaT, float noAccDeltaT)
                 aiDetailSumGlobalRadioMs = 0.0f;
                 aiDetailSumCenterRadioMs = 0.0f;
                 aiDetailSumCenterThinkMs = 0.0f;
+                aiDetailSumEastCenterThinkMs = 0.0f;
+                aiDetailSumWestCenterThinkMs = 0.0f;
+                aiDetailSumGuerrilaCenterThinkMs = 0.0f;
+                aiDetailSumCivilianCenterThinkMs = 0.0f;
                 aiDetailSumGroupRadioMs = 0.0f;
                 aiDetailSumLogicMs = 0.0f;
                 aiDetailSumMissionMs = 0.0f;
@@ -752,13 +774,110 @@ void World::PerformAI(float deltaT, float noAccDeltaT)
 
 void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insideVehcile)
 {
-    MoveOutAndDelete(_vehicles, deltaT, false);
-    MoveOutAndDelete(_animals, deltaT, false);
-    SimulateOnly(_vehicles, deltaT, simul, insideVehcile, SimulateVisibleNear);
-    SimulateOnly(_animals, deltaT, simul, insideVehcile, SimulateVisibleNear);
+    const bool vehListDetailEnabled = AppConfig::Instance().DevMode();
+    float vehListMoveVehiclesPreMs = 0.0f;
+    float vehListMoveAnimalsPreMs = 0.0f;
+    float vehListSimVehiclesMs = 0.0f;
+    float vehListSimAnimalsMs = 0.0f;
+    float vehListMoveVehiclesPostMs = 0.0f;
+    float vehListMoveAnimalsPostMs = 0.0f;
 
-    MoveOutAndDelete(_vehicles, deltaT, true);
-    MoveOutAndDelete(_animals, deltaT, true);
+    if (vehListDetailEnabled)
+    {
+        auto t0 = std::chrono::steady_clock::now();
+        MoveOutAndDelete(_vehicles, deltaT, false);
+        vehListMoveVehiclesPreMs += std::chrono::duration<float, std::milli>(
+                                        std::chrono::steady_clock::now() - t0)
+                                        .count();
+
+        t0 = std::chrono::steady_clock::now();
+        MoveOutAndDelete(_animals, deltaT, false);
+        vehListMoveAnimalsPreMs += std::chrono::duration<float, std::milli>(
+                                      std::chrono::steady_clock::now() - t0)
+                                      .count();
+
+        t0 = std::chrono::steady_clock::now();
+        SimulateOnly(_vehicles, deltaT, simul, insideVehcile, SimulateVisibleNear);
+        vehListSimVehiclesMs += std::chrono::duration<float, std::milli>(
+                                    std::chrono::steady_clock::now() - t0)
+                                    .count();
+
+        t0 = std::chrono::steady_clock::now();
+        SimulateOnly(_animals, deltaT, simul, insideVehcile, SimulateVisibleNear);
+        vehListSimAnimalsMs += std::chrono::duration<float, std::milli>(
+                                  std::chrono::steady_clock::now() - t0)
+                                  .count();
+
+        t0 = std::chrono::steady_clock::now();
+        MoveOutAndDelete(_vehicles, deltaT, true);
+        vehListMoveVehiclesPostMs += std::chrono::duration<float, std::milli>(
+                                         std::chrono::steady_clock::now() - t0)
+                                         .count();
+
+        t0 = std::chrono::steady_clock::now();
+        MoveOutAndDelete(_animals, deltaT, true);
+        vehListMoveAnimalsPostMs += std::chrono::duration<float, std::milli>(
+                                       std::chrono::steady_clock::now() - t0)
+                                       .count();
+    }
+    else
+    {
+        MoveOutAndDelete(_vehicles, deltaT, false);
+        MoveOutAndDelete(_animals, deltaT, false);
+        SimulateOnly(_vehicles, deltaT, simul, insideVehcile, SimulateVisibleNear);
+        SimulateOnly(_animals, deltaT, simul, insideVehcile, SimulateVisibleNear);
+
+        MoveOutAndDelete(_vehicles, deltaT, true);
+        MoveOutAndDelete(_animals, deltaT, true);
+    }
+
+    if (vehListDetailEnabled)
+    {
+        static int vehListDetailCalls = 0;
+        static float vehListDetailSumMoveVehiclesPreMs = 0.0f;
+        static float vehListDetailSumMoveAnimalsPreMs = 0.0f;
+        static float vehListDetailSumSimVehiclesMs = 0.0f;
+        static float vehListDetailSumSimAnimalsMs = 0.0f;
+        static float vehListDetailSumMoveVehiclesPostMs = 0.0f;
+        static float vehListDetailSumMoveAnimalsPostMs = 0.0f;
+        static int vehListDetailSumVehicles = 0;
+        static int vehListDetailSumAnimals = 0;
+
+        vehListDetailCalls++;
+        vehListDetailSumMoveVehiclesPreMs += vehListMoveVehiclesPreMs;
+        vehListDetailSumMoveAnimalsPreMs += vehListMoveAnimalsPreMs;
+        vehListDetailSumSimVehiclesMs += vehListSimVehiclesMs;
+        vehListDetailSumSimAnimalsMs += vehListSimAnimalsMs;
+        vehListDetailSumMoveVehiclesPostMs += vehListMoveVehiclesPostMs;
+        vehListDetailSumMoveAnimalsPostMs += vehListMoveAnimalsPostMs;
+        vehListDetailSumVehicles += NVehicles();
+        vehListDetailSumAnimals += NAnimals();
+
+        if (vehListDetailCalls >= 120)
+        {
+            const float invCalls = 1.0f / vehListDetailCalls;
+            LOG_INFO(World,
+                     "PERF veh list detail: moveVehPre {:.3f}ms, moveAnimalPre {:.3f}ms, simVeh {:.3f}ms, simAnimal {:.3f}ms, moveVehPost {:.3f}ms, moveAnimalPost {:.3f}ms | avg counts vehicles {}, animals {}",
+                     vehListDetailSumMoveVehiclesPreMs * invCalls,
+                     vehListDetailSumMoveAnimalsPreMs * invCalls,
+                     vehListDetailSumSimVehiclesMs * invCalls,
+                     vehListDetailSumSimAnimalsMs * invCalls,
+                     vehListDetailSumMoveVehiclesPostMs * invCalls,
+                     vehListDetailSumMoveAnimalsPostMs * invCalls,
+                     (int)(vehListDetailSumVehicles * invCalls),
+                     (int)(vehListDetailSumAnimals * invCalls));
+
+            vehListDetailCalls = 0;
+            vehListDetailSumMoveVehiclesPreMs = 0.0f;
+            vehListDetailSumMoveAnimalsPreMs = 0.0f;
+            vehListDetailSumSimVehiclesMs = 0.0f;
+            vehListDetailSumSimAnimalsMs = 0.0f;
+            vehListDetailSumMoveVehiclesPostMs = 0.0f;
+            vehListDetailSumMoveAnimalsPostMs = 0.0f;
+            vehListDetailSumVehicles = 0;
+            vehListDetailSumAnimals = 0;
+        }
+    }
 
 #if PERF_SIM
 #endif
