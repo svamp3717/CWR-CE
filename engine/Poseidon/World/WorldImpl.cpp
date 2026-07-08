@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <cmath>
+#include <chrono>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Containers/RStringArray.hpp>
@@ -434,67 +435,103 @@ void World::PerformAI(float deltaT, float noAccDeltaT)
 #endif
     )
     {
-        GetRadio().Simulate(deltaT);
-        if (_eastCenter)
+        const bool aiDetailEnabled = AppConfig::Instance().DevMode();
+        float aiDetailGlobalRadioMs = 0.0f;
+        float aiDetailCenterRadioMs = 0.0f;
+        float aiDetailCenterThinkMs = 0.0f;
+        float aiDetailGroupRadioMs = 0.0f;
+        float aiDetailLogicMs = 0.0f;
+        float aiDetailMissionMs = 0.0f;
+        int aiDetailGroups = 0;
+
+        if (aiDetailEnabled)
         {
-            _eastCenter->GetRadio().Simulate(deltaT);
-            _eastCenter->Think();
-            int i;
-            for (i = 0; i < _eastCenter->NGroups(); i++)
+            const auto aiDetailT0 = std::chrono::steady_clock::now();
+            GetRadio().Simulate(deltaT);
+            aiDetailGlobalRadioMs += std::chrono::duration<float, std::milli>(
+                                         std::chrono::steady_clock::now() - aiDetailT0)
+                                         .count();
+        }
+        else
+        {
+            GetRadio().Simulate(deltaT);
+        }
+
+        auto aiDetailSimulateCenter = [&](AICenter* center)
+        {
+            if (!center)
             {
-                AIGroup* grp = _eastCenter->GetGroup(i);
-                if (grp)
+                return;
+            }
+
+            if (aiDetailEnabled)
+            {
+                auto t0 = std::chrono::steady_clock::now();
+                center->GetRadio().Simulate(deltaT);
+                aiDetailCenterRadioMs += std::chrono::duration<float, std::milli>(
+                                             std::chrono::steady_clock::now() - t0)
+                                             .count();
+
+                t0 = std::chrono::steady_clock::now();
+                center->Think();
+                aiDetailCenterThinkMs += std::chrono::duration<float, std::milli>(
+                                            std::chrono::steady_clock::now() - t0)
+                                            .count();
+
+                t0 = std::chrono::steady_clock::now();
+                int i;
+                const int nGroups = center->NGroups();
+                aiDetailGroups += nGroups;
+                for (i = 0; i < nGroups; i++)
                 {
-                    grp->GetRadio().Simulate(deltaT);
+                    AIGroup* grp = center->GetGroup(i);
+                    if (grp)
+                    {
+                        grp->GetRadio().Simulate(deltaT);
+                    }
+                }
+                aiDetailGroupRadioMs += std::chrono::duration<float, std::milli>(
+                                            std::chrono::steady_clock::now() - t0)
+                                            .count();
+            }
+            else
+            {
+                center->GetRadio().Simulate(deltaT);
+                center->Think();
+                int i;
+                for (i = 0; i < center->NGroups(); i++)
+                {
+                    AIGroup* grp = center->GetGroup(i);
+                    if (grp)
+                    {
+                        grp->GetRadio().Simulate(deltaT);
+                    }
                 }
             }
-        }
-        if (_westCenter)
-        {
-            _westCenter->GetRadio().Simulate(deltaT);
-            _westCenter->Think();
-            int i;
-            for (i = 0; i < _westCenter->NGroups(); i++)
-            {
-                AIGroup* grp = _westCenter->GetGroup(i);
-                if (grp)
-                {
-                    grp->GetRadio().Simulate(deltaT);
-                }
-            }
-        }
-        if (_guerrilaCenter)
-        {
-            _guerrilaCenter->GetRadio().Simulate(deltaT);
-            _guerrilaCenter->Think();
-            int i;
-            for (i = 0; i < _guerrilaCenter->NGroups(); i++)
-            {
-                AIGroup* grp = _guerrilaCenter->GetGroup(i);
-                if (grp)
-                {
-                    grp->GetRadio().Simulate(deltaT);
-                }
-            }
-        }
-        if (_civilianCenter)
-        {
-            _civilianCenter->GetRadio().Simulate(deltaT);
-            _civilianCenter->Think();
-            int i;
-            for (i = 0; i < _civilianCenter->NGroups(); i++)
-            {
-                AIGroup* grp = _civilianCenter->GetGroup(i);
-                if (grp)
-                {
-                    grp->GetRadio().Simulate(deltaT);
-                }
-            }
-        }
+        };
+
+        aiDetailSimulateCenter(_eastCenter);
+        aiDetailSimulateCenter(_westCenter);
+        aiDetailSimulateCenter(_guerrilaCenter);
+        aiDetailSimulateCenter(_civilianCenter);
+
         if (_logicCenter)
         {
-            _logicCenter->Think();
+            if (aiDetailEnabled)
+            {
+                const auto aiDetailT0 = std::chrono::steady_clock::now();
+                _logicCenter->Think();
+                aiDetailLogicMs += std::chrono::duration<float, std::milli>(
+                                       std::chrono::steady_clock::now() - aiDetailT0)
+                                       .count();
+            }
+            else
+            {
+                _logicCenter->Think();
+            }
         }
+
+        const auto aiDetailMissionStart = aiDetailEnabled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point();
 
         if (_endMission == EMContinue)
         {
@@ -662,6 +699,54 @@ void World::PerformAI(float deltaT, float noAccDeltaT)
                 }
             }
         }
+
+        if (aiDetailEnabled)
+        {
+            aiDetailMissionMs += std::chrono::duration<float, std::milli>(
+                                     std::chrono::steady_clock::now() - aiDetailMissionStart)
+                                     .count();
+
+            static int aiDetailFrames = 0;
+            static float aiDetailSumGlobalRadioMs = 0.0f;
+            static float aiDetailSumCenterRadioMs = 0.0f;
+            static float aiDetailSumCenterThinkMs = 0.0f;
+            static float aiDetailSumGroupRadioMs = 0.0f;
+            static float aiDetailSumLogicMs = 0.0f;
+            static float aiDetailSumMissionMs = 0.0f;
+            static int aiDetailSumGroups = 0;
+
+            aiDetailFrames++;
+            aiDetailSumGlobalRadioMs += aiDetailGlobalRadioMs;
+            aiDetailSumCenterRadioMs += aiDetailCenterRadioMs;
+            aiDetailSumCenterThinkMs += aiDetailCenterThinkMs;
+            aiDetailSumGroupRadioMs += aiDetailGroupRadioMs;
+            aiDetailSumLogicMs += aiDetailLogicMs;
+            aiDetailSumMissionMs += aiDetailMissionMs;
+            aiDetailSumGroups += aiDetailGroups;
+
+            if (aiDetailFrames >= 120)
+            {
+                const float invFrames = 1.0f / aiDetailFrames;
+                LOG_INFO(World,
+                         "PERF ai detail: globalRadio {:.3f}ms, centerRadio {:.3f}ms, centerThink {:.3f}ms, groupRadio {:.3f}ms, logic {:.3f}ms, mission {:.3f}ms | avg groups {}",
+                         aiDetailSumGlobalRadioMs * invFrames,
+                         aiDetailSumCenterRadioMs * invFrames,
+                         aiDetailSumCenterThinkMs * invFrames,
+                         aiDetailSumGroupRadioMs * invFrames,
+                         aiDetailSumLogicMs * invFrames,
+                         aiDetailSumMissionMs * invFrames,
+                         (int)(aiDetailSumGroups * invFrames));
+
+                aiDetailFrames = 0;
+                aiDetailSumGlobalRadioMs = 0.0f;
+                aiDetailSumCenterRadioMs = 0.0f;
+                aiDetailSumCenterThinkMs = 0.0f;
+                aiDetailSumGroupRadioMs = 0.0f;
+                aiDetailSumLogicMs = 0.0f;
+                aiDetailSumMissionMs = 0.0f;
+                aiDetailSumGroups = 0;
+            }
+        }
     }
 }
 
@@ -718,50 +803,282 @@ void World::SimulateCloudlets(float deltaT)
 
 void World::SimulateAllVehicles(float deltaT, float noAccDeltaT, Entity* cameraVehicle)
 {
+    const bool vehDetailEnabled = AppConfig::Instance().DevMode();
+    float vehDetailFarImportanceMs = 0.0f;
+    float vehDetailNearImportanceMs = 0.0f;
+    float vehDetailActiveChannelsMs = 0.0f;
+    float vehDetailFastStartFrameMs = 0.0f;
+    float vehDetailCloudletsMs = 0.0f;
+    float vehDetailVehiclesMs = 0.0f;
+    float vehDetailFastVehiclesMs = 0.0f;
+    float vehDetailBuildingsMs = 0.0f;
+    float vehDetailAttachedMs = 0.0f;
+    int vehDetailVehicleSteps = 0;
+    int vehDetailFastSteps = 0;
+
     float farValidFor = 1.5;
     if (Glob.time > _farImportanceDistributionTime + farValidFor)
     {
-        DistributeFarImportances();
+        if (vehDetailEnabled)
+        {
+            const auto t0 = std::chrono::steady_clock::now();
+            DistributeFarImportances();
+            vehDetailFarImportanceMs += std::chrono::duration<float, std::milli>(
+                                            std::chrono::steady_clock::now() - t0)
+                                            .count();
+        }
+        else
+        {
+            DistributeFarImportances();
+        }
     }
     if (Glob.time > _nearImportanceDistributionTime + 1.0)
     {
-        DistributeNearImportances();
+        if (vehDetailEnabled)
+        {
+            const auto t0 = std::chrono::steady_clock::now();
+            DistributeNearImportances();
+            vehDetailNearImportanceMs += std::chrono::duration<float, std::milli>(
+                                             std::chrono::steady_clock::now() - t0)
+                                             .count();
+        }
+        else
+        {
+            DistributeNearImportances();
+        }
     }
-    SetActiveChannels();
+
+    if (vehDetailEnabled)
+    {
+        const auto t0 = std::chrono::steady_clock::now();
+        SetActiveChannels();
+        vehDetailActiveChannelsMs += std::chrono::duration<float, std::milli>(
+                                         std::chrono::steady_clock::now() - t0)
+                                         .count();
+    }
+    else
+    {
+        SetActiveChannels();
+    }
 #define MAX_SIM_STEP_VEHICLES (1.0 / 15)
 #define MAX_SIM_STEP_FAST (0.001)
 
-    for (int i = 0; i < _fastVehicles.Size(); i++)
+    if (vehDetailEnabled)
     {
-        Entity* vehicle = _fastVehicles[i];
-        vehicle->StartFrame();
+        const auto t0 = std::chrono::steady_clock::now();
+        for (int i = 0; i < _fastVehicles.Size(); i++)
+        {
+            Entity* vehicle = _fastVehicles[i];
+            vehicle->StartFrame();
+        }
+        vehDetailFastStartFrameMs += std::chrono::duration<float, std::milli>(
+                                         std::chrono::steady_clock::now() - t0)
+                                         .count();
+    }
+    else
+    {
+        for (int i = 0; i < _fastVehicles.Size(); i++)
+        {
+            Entity* vehicle = _fastVehicles[i];
+            vehicle->StartFrame();
+        }
     }
 
-    SimulateCloudlets(deltaT);
+    if (vehDetailEnabled)
+    {
+        const auto t0 = std::chrono::steady_clock::now();
+        SimulateCloudlets(deltaT);
+        vehDetailCloudletsMs += std::chrono::duration<float, std::milli>(
+                                    std::chrono::steady_clock::now() - t0)
+                                    .count();
+    }
+    else
+    {
+        SimulateCloudlets(deltaT);
+    }
+
     float toSimVehicles = deltaT;
     float toSimFast = deltaT;
     while (toSimVehicles > MAX_SIM_STEP_VEHICLES)
     {
-        SimulateVehicles(MAX_SIM_STEP_VEHICLES, &Entity::SimulateOptimized, cameraVehicle);
+        if (vehDetailEnabled)
+        {
+            const auto t0 = std::chrono::steady_clock::now();
+            SimulateVehicles(MAX_SIM_STEP_VEHICLES, &Entity::SimulateOptimized, cameraVehicle);
+            vehDetailVehiclesMs += std::chrono::duration<float, std::milli>(
+                                       std::chrono::steady_clock::now() - t0)
+                                       .count();
+            vehDetailVehicleSteps++;
+        }
+        else
+        {
+            SimulateVehicles(MAX_SIM_STEP_VEHICLES, &Entity::SimulateOptimized, cameraVehicle);
+        }
         toSimVehicles -= MAX_SIM_STEP_VEHICLES;
         while (toSimFast > toSimVehicles && toSimFast > MAX_SIM_STEP_FAST)
         {
-            SimulateFastVehicles(MAX_SIM_STEP_FAST, &Entity::SimulateOptimized);
+            if (vehDetailEnabled)
+            {
+                const auto t0 = std::chrono::steady_clock::now();
+                SimulateFastVehicles(MAX_SIM_STEP_FAST, &Entity::SimulateOptimized);
+                vehDetailFastVehiclesMs += std::chrono::duration<float, std::milli>(
+                                               std::chrono::steady_clock::now() - t0)
+                                               .count();
+                vehDetailFastSteps++;
+            }
+            else
+            {
+                SimulateFastVehicles(MAX_SIM_STEP_FAST, &Entity::SimulateOptimized);
+            }
             toSimFast -= MAX_SIM_STEP_FAST;
         }
     }
-    SimulateVehicles(toSimVehicles, &Entity::SimulateRest, cameraVehicle);
+
+    if (vehDetailEnabled)
+    {
+        const auto t0 = std::chrono::steady_clock::now();
+        SimulateVehicles(toSimVehicles, &Entity::SimulateRest, cameraVehicle);
+        vehDetailVehiclesMs += std::chrono::duration<float, std::milli>(
+                                   std::chrono::steady_clock::now() - t0)
+                                   .count();
+        vehDetailVehicleSteps++;
+    }
+    else
+    {
+        SimulateVehicles(toSimVehicles, &Entity::SimulateRest, cameraVehicle);
+    }
+
     while (toSimFast > MAX_SIM_STEP_FAST)
     {
-        SimulateFastVehicles(MAX_SIM_STEP_FAST, &Entity::SimulateOptimized);
+        if (vehDetailEnabled)
+        {
+            const auto t0 = std::chrono::steady_clock::now();
+            SimulateFastVehicles(MAX_SIM_STEP_FAST, &Entity::SimulateOptimized);
+            vehDetailFastVehiclesMs += std::chrono::duration<float, std::milli>(
+                                           std::chrono::steady_clock::now() - t0)
+                                           .count();
+            vehDetailFastSteps++;
+        }
+        else
+        {
+            SimulateFastVehicles(MAX_SIM_STEP_FAST, &Entity::SimulateOptimized);
+        }
         toSimFast -= MAX_SIM_STEP_FAST;
     }
-    SimulateFastVehicles(toSimFast, &Entity::SimulateRest);
-    SimulateBuildings(deltaT, &Entity::SimulateOptimized);
 
-    for (int i = 0; i < _attached.Size(); i++)
+    if (vehDetailEnabled)
     {
-        _attached[i]->UpdatePosition();
+        auto t0 = std::chrono::steady_clock::now();
+        SimulateFastVehicles(toSimFast, &Entity::SimulateRest);
+        vehDetailFastVehiclesMs += std::chrono::duration<float, std::milli>(
+                                       std::chrono::steady_clock::now() - t0)
+                                       .count();
+        vehDetailFastSteps++;
+
+        t0 = std::chrono::steady_clock::now();
+        SimulateBuildings(deltaT, &Entity::SimulateOptimized);
+        vehDetailBuildingsMs += std::chrono::duration<float, std::milli>(
+                                    std::chrono::steady_clock::now() - t0)
+                                    .count();
+
+        t0 = std::chrono::steady_clock::now();
+        for (int i = 0; i < _attached.Size(); i++)
+        {
+            _attached[i]->UpdatePosition();
+        }
+        vehDetailAttachedMs += std::chrono::duration<float, std::milli>(
+                                   std::chrono::steady_clock::now() - t0)
+                                   .count();
+    }
+    else
+    {
+        SimulateFastVehicles(toSimFast, &Entity::SimulateRest);
+        SimulateBuildings(deltaT, &Entity::SimulateOptimized);
+
+        for (int i = 0; i < _attached.Size(); i++)
+        {
+            _attached[i]->UpdatePosition();
+        }
+    }
+
+    if (vehDetailEnabled)
+    {
+        static int vehDetailFrames = 0;
+        static float vehDetailSumFarImportanceMs = 0.0f;
+        static float vehDetailSumNearImportanceMs = 0.0f;
+        static float vehDetailSumActiveChannelsMs = 0.0f;
+        static float vehDetailSumFastStartFrameMs = 0.0f;
+        static float vehDetailSumCloudletsMs = 0.0f;
+        static float vehDetailSumVehiclesMs = 0.0f;
+        static float vehDetailSumFastVehiclesMs = 0.0f;
+        static float vehDetailSumBuildingsMs = 0.0f;
+        static float vehDetailSumAttachedMs = 0.0f;
+        static int vehDetailSumVehicleSteps = 0;
+        static int vehDetailSumFastSteps = 0;
+        static int vehDetailSumVehicles = 0;
+        static int vehDetailSumAnimals = 0;
+        static int vehDetailSumBuildings = 0;
+        static int vehDetailSumFastVehicles = 0;
+        static int vehDetailSumAttached = 0;
+
+        vehDetailFrames++;
+        vehDetailSumFarImportanceMs += vehDetailFarImportanceMs;
+        vehDetailSumNearImportanceMs += vehDetailNearImportanceMs;
+        vehDetailSumActiveChannelsMs += vehDetailActiveChannelsMs;
+        vehDetailSumFastStartFrameMs += vehDetailFastStartFrameMs;
+        vehDetailSumCloudletsMs += vehDetailCloudletsMs;
+        vehDetailSumVehiclesMs += vehDetailVehiclesMs;
+        vehDetailSumFastVehiclesMs += vehDetailFastVehiclesMs;
+        vehDetailSumBuildingsMs += vehDetailBuildingsMs;
+        vehDetailSumAttachedMs += vehDetailAttachedMs;
+        vehDetailSumVehicleSteps += vehDetailVehicleSteps;
+        vehDetailSumFastSteps += vehDetailFastSteps;
+        vehDetailSumVehicles += NVehicles();
+        vehDetailSumAnimals += NAnimals();
+        vehDetailSumBuildings += NBuildings();
+        vehDetailSumFastVehicles += NFastVehicles();
+        vehDetailSumAttached += _attached.Size();
+
+        if (vehDetailFrames >= 120)
+        {
+            const float invFrames = 1.0f / vehDetailFrames;
+            LOG_INFO(World,
+                     "PERF veh detail: farImp {:.3f}ms, nearImp {:.3f}ms, activeChan {:.3f}ms, fastStart {:.3f}ms, cloudlets {:.3f}ms, vehicles {:.3f}ms, fast {:.3f}ms, buildings {:.3f}ms, attached {:.3f}ms | steps veh {}, fast {} | avg counts vehicles {}, animals {}, buildings {}, fast {}, attached {}",
+                     vehDetailSumFarImportanceMs * invFrames,
+                     vehDetailSumNearImportanceMs * invFrames,
+                     vehDetailSumActiveChannelsMs * invFrames,
+                     vehDetailSumFastStartFrameMs * invFrames,
+                     vehDetailSumCloudletsMs * invFrames,
+                     vehDetailSumVehiclesMs * invFrames,
+                     vehDetailSumFastVehiclesMs * invFrames,
+                     vehDetailSumBuildingsMs * invFrames,
+                     vehDetailSumAttachedMs * invFrames,
+                     (int)(vehDetailSumVehicleSteps * invFrames),
+                     (int)(vehDetailSumFastSteps * invFrames),
+                     (int)(vehDetailSumVehicles * invFrames),
+                     (int)(vehDetailSumAnimals * invFrames),
+                     (int)(vehDetailSumBuildings * invFrames),
+                     (int)(vehDetailSumFastVehicles * invFrames),
+                     (int)(vehDetailSumAttached * invFrames));
+
+            vehDetailFrames = 0;
+            vehDetailSumFarImportanceMs = 0.0f;
+            vehDetailSumNearImportanceMs = 0.0f;
+            vehDetailSumActiveChannelsMs = 0.0f;
+            vehDetailSumFastStartFrameMs = 0.0f;
+            vehDetailSumCloudletsMs = 0.0f;
+            vehDetailSumVehiclesMs = 0.0f;
+            vehDetailSumFastVehiclesMs = 0.0f;
+            vehDetailSumBuildingsMs = 0.0f;
+            vehDetailSumAttachedMs = 0.0f;
+            vehDetailSumVehicleSteps = 0;
+            vehDetailSumFastSteps = 0;
+            vehDetailSumVehicles = 0;
+            vehDetailSumAnimals = 0;
+            vehDetailSumBuildings = 0;
+            vehDetailSumFastVehicles = 0;
+            vehDetailSumAttached = 0;
+        }
     }
 }
 
