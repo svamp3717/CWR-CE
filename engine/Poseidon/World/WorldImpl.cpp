@@ -782,6 +782,84 @@ void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insi
     float vehListMoveVehiclesPostMs = 0.0f;
     float vehListMoveAnimalsPostMs = 0.0f;
 
+    float vehListSimVehVisibleNearMs = 0.0f;
+    float vehListSimVehVisibleFarMs = 0.0f;
+    float vehListSimVehInvisibleNearMs = 0.0f;
+    float vehListSimVehInvisibleFarMs = 0.0f;
+    float vehListSimAnimalVisibleNearMs = 0.0f;
+    float vehListSimAnimalVisibleFarMs = 0.0f;
+    float vehListSimAnimalInvisibleNearMs = 0.0f;
+    float vehListSimAnimalInvisibleFarMs = 0.0f;
+
+    struct VehTypeCounts
+    {
+        int all = 0;
+        int man = 0;
+        int tank = 0;
+        int apc = 0;
+        int car = 0;
+        int air = 0;
+        int ship = 0;
+        int other = 0;
+    };
+
+    VehTypeCounts vehTypeCounts;
+
+    if (vehListDetailEnabled)
+    {
+        auto countVehicleTypes = [&](VehicleList& list)
+        {
+            for (int i = 0; i < list.Size(); i++)
+            {
+                Entity* vehicle = list[i];
+                if (!vehicle)
+                {
+                    continue;
+                }
+
+                vehTypeCounts.all++;
+                const EntityType* type = vehicle->GetVehicleType();
+                if (!type)
+                {
+                    vehTypeCounts.other++;
+                }
+                else if (type->IsKindOf(Preloaded(VTypeMan)))
+                {
+                    vehTypeCounts.man++;
+                }
+                else if (type->IsKindOf(Preloaded(VTypeTank)))
+                {
+                    vehTypeCounts.tank++;
+                }
+                else if (type->IsKindOf(Preloaded(VTypeAPC)))
+                {
+                    vehTypeCounts.apc++;
+                }
+                else if (type->IsKindOf(Preloaded(VTypeCar)))
+                {
+                    vehTypeCounts.car++;
+                }
+                else if (type->IsKindOf(Preloaded(VTypeAir)))
+                {
+                    vehTypeCounts.air++;
+                }
+                else if (type->IsKindOf(Preloaded(VTypeShip)))
+                {
+                    vehTypeCounts.ship++;
+                }
+                else
+                {
+                    vehTypeCounts.other++;
+                }
+            }
+        };
+
+        countVehicleTypes(_vehicles._visibleNear);
+        countVehicleTypes(_vehicles._visibleFar);
+        countVehicleTypes(_vehicles._invisibleNear);
+        countVehicleTypes(_vehicles._invisibleFar);
+    }
+
     if (vehListDetailEnabled)
     {
         auto t0 = std::chrono::steady_clock::now();
@@ -796,17 +874,29 @@ void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insi
                                       std::chrono::steady_clock::now() - t0)
                                       .count();
 
-        t0 = std::chrono::steady_clock::now();
-        SimulateOnly(_vehicles, deltaT, simul, insideVehcile, SimulateVisibleNear);
-        vehListSimVehiclesMs += std::chrono::duration<float, std::milli>(
-                                    std::chrono::steady_clock::now() - t0)
-                                    .count();
+        auto simulateTimed = [&](VehicleList& list, SimulationImportance prec, float& bucketMs)
+        {
+            const auto simStart = std::chrono::steady_clock::now();
+            SimulateOnly(list, deltaT, simul, insideVehcile, prec);
+            bucketMs += std::chrono::duration<float, std::milli>(
+                            std::chrono::steady_clock::now() - simStart)
+                            .count();
+        };
 
-        t0 = std::chrono::steady_clock::now();
-        SimulateOnly(_animals, deltaT, simul, insideVehcile, SimulateVisibleNear);
-        vehListSimAnimalsMs += std::chrono::duration<float, std::milli>(
-                                  std::chrono::steady_clock::now() - t0)
-                                  .count();
+        simulateTimed(_vehicles._visibleNear, SimulateVisibleNear, vehListSimVehVisibleNearMs);
+        simulateTimed(_vehicles._visibleFar, SimulateVisibleFar, vehListSimVehVisibleFarMs);
+        simulateTimed(_vehicles._invisibleNear, SimulateInvisibleNear, vehListSimVehInvisibleNearMs);
+        simulateTimed(_vehicles._invisibleFar, SimulateInvisibleFar, vehListSimVehInvisibleFarMs);
+
+        simulateTimed(_animals._visibleNear, SimulateVisibleNear, vehListSimAnimalVisibleNearMs);
+        simulateTimed(_animals._visibleFar, SimulateVisibleFar, vehListSimAnimalVisibleFarMs);
+        simulateTimed(_animals._invisibleNear, SimulateInvisibleNear, vehListSimAnimalInvisibleNearMs);
+        simulateTimed(_animals._invisibleFar, SimulateInvisibleFar, vehListSimAnimalInvisibleFarMs);
+
+        vehListSimVehiclesMs = vehListSimVehVisibleNearMs + vehListSimVehVisibleFarMs +
+                               vehListSimVehInvisibleNearMs + vehListSimVehInvisibleFarMs;
+        vehListSimAnimalsMs = vehListSimAnimalVisibleNearMs + vehListSimAnimalVisibleFarMs +
+                              vehListSimAnimalInvisibleNearMs + vehListSimAnimalInvisibleFarMs;
 
         t0 = std::chrono::steady_clock::now();
         MoveOutAndDelete(_vehicles, deltaT, true);
@@ -840,8 +930,35 @@ void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insi
         static float vehListDetailSumSimAnimalsMs = 0.0f;
         static float vehListDetailSumMoveVehiclesPostMs = 0.0f;
         static float vehListDetailSumMoveAnimalsPostMs = 0.0f;
+
+        static float vehListDetailSumVehVisibleNearMs = 0.0f;
+        static float vehListDetailSumVehVisibleFarMs = 0.0f;
+        static float vehListDetailSumVehInvisibleNearMs = 0.0f;
+        static float vehListDetailSumVehInvisibleFarMs = 0.0f;
+        static float vehListDetailSumAnimalVisibleNearMs = 0.0f;
+        static float vehListDetailSumAnimalVisibleFarMs = 0.0f;
+        static float vehListDetailSumAnimalInvisibleNearMs = 0.0f;
+        static float vehListDetailSumAnimalInvisibleFarMs = 0.0f;
+
         static int vehListDetailSumVehicles = 0;
         static int vehListDetailSumAnimals = 0;
+        static int vehListDetailSumVehVisibleNear = 0;
+        static int vehListDetailSumVehVisibleFar = 0;
+        static int vehListDetailSumVehInvisibleNear = 0;
+        static int vehListDetailSumVehInvisibleFar = 0;
+        static int vehListDetailSumAnimalVisibleNear = 0;
+        static int vehListDetailSumAnimalVisibleFar = 0;
+        static int vehListDetailSumAnimalInvisibleNear = 0;
+        static int vehListDetailSumAnimalInvisibleFar = 0;
+
+        static int vehListDetailSumTypeAll = 0;
+        static int vehListDetailSumTypeMan = 0;
+        static int vehListDetailSumTypeTank = 0;
+        static int vehListDetailSumTypeApc = 0;
+        static int vehListDetailSumTypeCar = 0;
+        static int vehListDetailSumTypeAir = 0;
+        static int vehListDetailSumTypeShip = 0;
+        static int vehListDetailSumTypeOther = 0;
 
         vehListDetailCalls++;
         vehListDetailSumMoveVehiclesPreMs += vehListMoveVehiclesPreMs;
@@ -850,8 +967,35 @@ void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insi
         vehListDetailSumSimAnimalsMs += vehListSimAnimalsMs;
         vehListDetailSumMoveVehiclesPostMs += vehListMoveVehiclesPostMs;
         vehListDetailSumMoveAnimalsPostMs += vehListMoveAnimalsPostMs;
+
+        vehListDetailSumVehVisibleNearMs += vehListSimVehVisibleNearMs;
+        vehListDetailSumVehVisibleFarMs += vehListSimVehVisibleFarMs;
+        vehListDetailSumVehInvisibleNearMs += vehListSimVehInvisibleNearMs;
+        vehListDetailSumVehInvisibleFarMs += vehListSimVehInvisibleFarMs;
+        vehListDetailSumAnimalVisibleNearMs += vehListSimAnimalVisibleNearMs;
+        vehListDetailSumAnimalVisibleFarMs += vehListSimAnimalVisibleFarMs;
+        vehListDetailSumAnimalInvisibleNearMs += vehListSimAnimalInvisibleNearMs;
+        vehListDetailSumAnimalInvisibleFarMs += vehListSimAnimalInvisibleFarMs;
+
         vehListDetailSumVehicles += NVehicles();
         vehListDetailSumAnimals += NAnimals();
+        vehListDetailSumVehVisibleNear += _vehicles._visibleNear.Size();
+        vehListDetailSumVehVisibleFar += _vehicles._visibleFar.Size();
+        vehListDetailSumVehInvisibleNear += _vehicles._invisibleNear.Size();
+        vehListDetailSumVehInvisibleFar += _vehicles._invisibleFar.Size();
+        vehListDetailSumAnimalVisibleNear += _animals._visibleNear.Size();
+        vehListDetailSumAnimalVisibleFar += _animals._visibleFar.Size();
+        vehListDetailSumAnimalInvisibleNear += _animals._invisibleNear.Size();
+        vehListDetailSumAnimalInvisibleFar += _animals._invisibleFar.Size();
+
+        vehListDetailSumTypeAll += vehTypeCounts.all;
+        vehListDetailSumTypeMan += vehTypeCounts.man;
+        vehListDetailSumTypeTank += vehTypeCounts.tank;
+        vehListDetailSumTypeApc += vehTypeCounts.apc;
+        vehListDetailSumTypeCar += vehTypeCounts.car;
+        vehListDetailSumTypeAir += vehTypeCounts.air;
+        vehListDetailSumTypeShip += vehTypeCounts.ship;
+        vehListDetailSumTypeOther += vehTypeCounts.other;
 
         if (vehListDetailCalls >= 120)
         {
@@ -867,6 +1011,36 @@ void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insi
                      (int)(vehListDetailSumVehicles * invCalls),
                      (int)(vehListDetailSumAnimals * invCalls));
 
+            LOG_INFO(World,
+                     "PERF veh dist detail: veh VN {:.3f}ms/{}, VF {:.3f}ms/{}, IN {:.3f}ms/{}, IF {:.3f}ms/{} | animal VN {:.3f}ms/{}, VF {:.3f}ms/{}, IN {:.3f}ms/{}, IF {:.3f}ms/{}",
+                     vehListDetailSumVehVisibleNearMs * invCalls,
+                     (int)(vehListDetailSumVehVisibleNear * invCalls),
+                     vehListDetailSumVehVisibleFarMs * invCalls,
+                     (int)(vehListDetailSumVehVisibleFar * invCalls),
+                     vehListDetailSumVehInvisibleNearMs * invCalls,
+                     (int)(vehListDetailSumVehInvisibleNear * invCalls),
+                     vehListDetailSumVehInvisibleFarMs * invCalls,
+                     (int)(vehListDetailSumVehInvisibleFar * invCalls),
+                     vehListDetailSumAnimalVisibleNearMs * invCalls,
+                     (int)(vehListDetailSumAnimalVisibleNear * invCalls),
+                     vehListDetailSumAnimalVisibleFarMs * invCalls,
+                     (int)(vehListDetailSumAnimalVisibleFar * invCalls),
+                     vehListDetailSumAnimalInvisibleNearMs * invCalls,
+                     (int)(vehListDetailSumAnimalInvisibleNear * invCalls),
+                     vehListDetailSumAnimalInvisibleFarMs * invCalls,
+                     (int)(vehListDetailSumAnimalInvisibleFar * invCalls));
+
+            LOG_INFO(World,
+                     "PERF veh type detail: all {}, man {}, tank {}, apc {}, car {}, air {}, ship {}, other {}",
+                     (int)(vehListDetailSumTypeAll * invCalls),
+                     (int)(vehListDetailSumTypeMan * invCalls),
+                     (int)(vehListDetailSumTypeTank * invCalls),
+                     (int)(vehListDetailSumTypeApc * invCalls),
+                     (int)(vehListDetailSumTypeCar * invCalls),
+                     (int)(vehListDetailSumTypeAir * invCalls),
+                     (int)(vehListDetailSumTypeShip * invCalls),
+                     (int)(vehListDetailSumTypeOther * invCalls));
+
             vehListDetailCalls = 0;
             vehListDetailSumMoveVehiclesPreMs = 0.0f;
             vehListDetailSumMoveAnimalsPreMs = 0.0f;
@@ -874,8 +1048,35 @@ void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insi
             vehListDetailSumSimAnimalsMs = 0.0f;
             vehListDetailSumMoveVehiclesPostMs = 0.0f;
             vehListDetailSumMoveAnimalsPostMs = 0.0f;
+
+            vehListDetailSumVehVisibleNearMs = 0.0f;
+            vehListDetailSumVehVisibleFarMs = 0.0f;
+            vehListDetailSumVehInvisibleNearMs = 0.0f;
+            vehListDetailSumVehInvisibleFarMs = 0.0f;
+            vehListDetailSumAnimalVisibleNearMs = 0.0f;
+            vehListDetailSumAnimalVisibleFarMs = 0.0f;
+            vehListDetailSumAnimalInvisibleNearMs = 0.0f;
+            vehListDetailSumAnimalInvisibleFarMs = 0.0f;
+
             vehListDetailSumVehicles = 0;
             vehListDetailSumAnimals = 0;
+            vehListDetailSumVehVisibleNear = 0;
+            vehListDetailSumVehVisibleFar = 0;
+            vehListDetailSumVehInvisibleNear = 0;
+            vehListDetailSumVehInvisibleFar = 0;
+            vehListDetailSumAnimalVisibleNear = 0;
+            vehListDetailSumAnimalVisibleFar = 0;
+            vehListDetailSumAnimalInvisibleNear = 0;
+            vehListDetailSumAnimalInvisibleFar = 0;
+
+            vehListDetailSumTypeAll = 0;
+            vehListDetailSumTypeMan = 0;
+            vehListDetailSumTypeTank = 0;
+            vehListDetailSumTypeApc = 0;
+            vehListDetailSumTypeCar = 0;
+            vehListDetailSumTypeAir = 0;
+            vehListDetailSumTypeShip = 0;
+            vehListDetailSumTypeOther = 0;
         }
     }
 
