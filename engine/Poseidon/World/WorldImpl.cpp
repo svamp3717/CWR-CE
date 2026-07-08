@@ -777,22 +777,39 @@ void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insi
     const bool vehListDetailEnabled = AppConfig::Instance().DevMode();
 
     // Diagnostic/optimization candidate:
-    // - only active in --dev builds/runs
-    // - near vehicles still run every call
-    // - far vehicles run every second call with accumulated deltaT
+    // - only active in --dev / AppConfig::Instance().DevMode()
+    // - visible-near and invisible-near vehicles still run every call
+    // - far vehicles are throttled by type, using carried deltaT per bucket
+    // - air remains every call, because helicopters are already chaos with rotors
     // This is deliberately kept out of the non-dev path below.
-    constexpr bool EnableFarVehicleThrottlePerfTest = true;
-    constexpr int FarVehicleThrottleModulo = 2;
+    constexpr bool EnableFarVehicleTypeThrottlePerfTest = true;
+    constexpr int FarVehicleThrottleManModulo = 3;
+    constexpr int FarVehicleThrottleTankModulo = 2;
+    constexpr int FarVehicleThrottleApcModulo = 2;
+    constexpr int FarVehicleThrottleCarModulo = 2;
+    constexpr int FarVehicleThrottleAirModulo = 1;
+    constexpr int FarVehicleThrottleShipModulo = 1;
+    constexpr int FarVehicleThrottleOtherModulo = 2;
+
+    enum FarThrottleTypeBucket
+    {
+        FarThrottleMan = 0,
+        FarThrottleTank,
+        FarThrottleApc,
+        FarThrottleCar,
+        FarThrottleAir,
+        FarThrottleShip,
+        FarThrottleOther,
+        FarThrottleTypeCount
+    };
 
     static int vehFarThrottleCounter = 0;
-    static float vehVisibleFarCarryDelta = 0.0f;
-    static float vehInvisibleFarCarryDelta = 0.0f;
+    static float vehVisibleFarCarryDelta[FarThrottleTypeCount] = {};
+    static float vehInvisibleFarCarryDelta[FarThrottleTypeCount] = {};
 
-    const bool vehFarThrottleEnabled = vehListDetailEnabled && EnableFarVehicleThrottlePerfTest;
-    bool vehFarThrottleSimThisCall = true;
+    const bool vehFarThrottleEnabled = vehListDetailEnabled && EnableFarVehicleTypeThrottlePerfTest;
     if (vehFarThrottleEnabled)
     {
-        vehFarThrottleSimThisCall = (vehFarThrottleCounter % FarVehicleThrottleModulo) == 0;
         vehFarThrottleCounter++;
     }
 
@@ -814,8 +831,25 @@ void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insi
 
     int vehFarThrottleSkippedVisibleFar = 0;
     int vehFarThrottleSkippedInvisibleFar = 0;
+    int vehFarThrottleRanVisibleFar = 0;
+    int vehFarThrottleRanInvisibleFar = 0;
     float vehFarThrottleVisibleFarDelta = 0.0f;
     float vehFarThrottleInvisibleFarDelta = 0.0f;
+
+    int vehFarThrottleSkippedVisibleFarMan = 0;
+    int vehFarThrottleSkippedVisibleFarTank = 0;
+    int vehFarThrottleSkippedVisibleFarApc = 0;
+    int vehFarThrottleSkippedVisibleFarCar = 0;
+    int vehFarThrottleSkippedVisibleFarAir = 0;
+    int vehFarThrottleSkippedVisibleFarShip = 0;
+    int vehFarThrottleSkippedVisibleFarOther = 0;
+    int vehFarThrottleSkippedInvisibleFarMan = 0;
+    int vehFarThrottleSkippedInvisibleFarTank = 0;
+    int vehFarThrottleSkippedInvisibleFarApc = 0;
+    int vehFarThrottleSkippedInvisibleFarCar = 0;
+    int vehFarThrottleSkippedInvisibleFarAir = 0;
+    int vehFarThrottleSkippedInvisibleFarShip = 0;
+    int vehFarThrottleSkippedInvisibleFarOther = 0;
 
     struct VehTypeCounts
     {
@@ -883,6 +917,58 @@ void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insi
             return VTypeShip;
         }
         return VTypeAllVehicles;
+    };
+
+    auto farThrottleBucket = [&](Entity* vehicle)
+    {
+        switch (classifyVehicleType(vehicle))
+        {
+            case VTypeMan:
+                return FarThrottleMan;
+            case VTypeTank:
+                return FarThrottleTank;
+            case VTypeAPC:
+                return FarThrottleApc;
+            case VTypeCar:
+                return FarThrottleCar;
+            case VTypeAir:
+                return FarThrottleAir;
+            case VTypeShip:
+                return FarThrottleShip;
+            default:
+                return FarThrottleOther;
+        }
+    };
+
+    auto farThrottleModulo = [&](int bucket)
+    {
+        switch (bucket)
+        {
+            case FarThrottleMan:
+                return FarVehicleThrottleManModulo;
+            case FarThrottleTank:
+                return FarVehicleThrottleTankModulo;
+            case FarThrottleApc:
+                return FarVehicleThrottleApcModulo;
+            case FarThrottleCar:
+                return FarVehicleThrottleCarModulo;
+            case FarThrottleAir:
+                return FarVehicleThrottleAirModulo;
+            case FarThrottleShip:
+                return FarVehicleThrottleShipModulo;
+            default:
+                return FarVehicleThrottleOtherModulo;
+        }
+    };
+
+    auto shouldRunFarBucket = [&](int bucket)
+    {
+        if (!vehFarThrottleEnabled)
+        {
+            return true;
+        }
+        const int modulo = farThrottleModulo(bucket);
+        return modulo <= 1 || (vehFarThrottleCounter % modulo) == 0;
     };
 
     auto addVehicleTypeCount = [&](Entity* vehicle, VehTypeCounts& counts)
@@ -954,6 +1040,55 @@ void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insi
         }
     };
 
+    auto addSkippedFarType = [&](Entity* vehicle, bool invisibleFar)
+    {
+        switch (classifyVehicleType(vehicle))
+        {
+            case VTypeMan:
+                if (invisibleFar)
+                    vehFarThrottleSkippedInvisibleFarMan++;
+                else
+                    vehFarThrottleSkippedVisibleFarMan++;
+                break;
+            case VTypeTank:
+                if (invisibleFar)
+                    vehFarThrottleSkippedInvisibleFarTank++;
+                else
+                    vehFarThrottleSkippedVisibleFarTank++;
+                break;
+            case VTypeAPC:
+                if (invisibleFar)
+                    vehFarThrottleSkippedInvisibleFarApc++;
+                else
+                    vehFarThrottleSkippedVisibleFarApc++;
+                break;
+            case VTypeCar:
+                if (invisibleFar)
+                    vehFarThrottleSkippedInvisibleFarCar++;
+                else
+                    vehFarThrottleSkippedVisibleFarCar++;
+                break;
+            case VTypeAir:
+                if (invisibleFar)
+                    vehFarThrottleSkippedInvisibleFarAir++;
+                else
+                    vehFarThrottleSkippedVisibleFarAir++;
+                break;
+            case VTypeShip:
+                if (invisibleFar)
+                    vehFarThrottleSkippedInvisibleFarShip++;
+                else
+                    vehFarThrottleSkippedVisibleFarShip++;
+                break;
+            default:
+                if (invisibleFar)
+                    vehFarThrottleSkippedInvisibleFarOther++;
+                else
+                    vehFarThrottleSkippedVisibleFarOther++;
+                break;
+        }
+    };
+
     if (vehListDetailEnabled)
     {
         auto countVehicleTypes = [&](VehicleList& list)
@@ -993,9 +1128,14 @@ void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insi
                             .count();
         };
 
-        auto simulateFarTimedByType = [&](VehicleList& list, float simDeltaT, SimulationImportance prec, float& bucketMs,
-                                          VehTypeMs& typeMs)
+        auto simulateFarTimedByType = [&](VehicleList& list, SimulationImportance prec, float& bucketMs,
+                                          VehTypeMs& typeMs, float* carryDelta, bool invisibleFar)
         {
+            for (int bucket = 0; bucket < FarThrottleTypeCount; bucket++)
+            {
+                carryDelta[bucket] += deltaT;
+            }
+
             for (int i = 0; i < list.Size(); i++)
             {
                 Entity* vehicle = list[i];
@@ -1004,6 +1144,18 @@ void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insi
                     continue;
                 }
 
+                const int bucket = farThrottleBucket(vehicle);
+                if (!shouldRunFarBucket(bucket))
+                {
+                    if (invisibleFar)
+                        vehFarThrottleSkippedInvisibleFar++;
+                    else
+                        vehFarThrottleSkippedVisibleFar++;
+                    addSkippedFarType(vehicle, invisibleFar);
+                    continue;
+                }
+
+                const float simDeltaT = carryDelta[bucket];
                 SimulationImportance vehiclePrec = vehicle == insideVehcile ? SimulateCamera : prec;
                 const auto simStart = std::chrono::steady_clock::now();
                 (vehicle->*simul)(simDeltaT, vehiclePrec);
@@ -1012,38 +1164,32 @@ void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insi
                                      .count();
                 bucketMs += ms;
                 addVehicleTypeMs(vehicle, ms, typeMs);
+
+                if (invisibleFar)
+                    vehFarThrottleRanInvisibleFar++;
+                else
+                    vehFarThrottleRanVisibleFar++;
+            }
+
+            for (int bucket = 0; bucket < FarThrottleTypeCount; bucket++)
+            {
+                if (shouldRunFarBucket(bucket))
+                {
+                    if (invisibleFar)
+                        vehFarThrottleInvisibleFarDelta += carryDelta[bucket];
+                    else
+                        vehFarThrottleVisibleFarDelta += carryDelta[bucket];
+                    carryDelta[bucket] = 0.0f;
+                }
             }
         };
 
         simulateTimed(_vehicles._visibleNear, deltaT, SimulateVisibleNear, vehListSimVehVisibleNearMs);
-
-        vehVisibleFarCarryDelta += deltaT;
-        if (!vehFarThrottleEnabled || vehFarThrottleSimThisCall)
-        {
-            vehFarThrottleVisibleFarDelta = vehVisibleFarCarryDelta;
-            simulateFarTimedByType(_vehicles._visibleFar, vehVisibleFarCarryDelta, SimulateVisibleFar,
-                                   vehListSimVehVisibleFarMs, vehVisibleFarTypeMs);
-            vehVisibleFarCarryDelta = 0.0f;
-        }
-        else
-        {
-            vehFarThrottleSkippedVisibleFar = _vehicles._visibleFar.Size();
-        }
-
+        simulateFarTimedByType(_vehicles._visibleFar, SimulateVisibleFar, vehListSimVehVisibleFarMs,
+                               vehVisibleFarTypeMs, vehVisibleFarCarryDelta, false);
         simulateTimed(_vehicles._invisibleNear, deltaT, SimulateInvisibleNear, vehListSimVehInvisibleNearMs);
-
-        vehInvisibleFarCarryDelta += deltaT;
-        if (!vehFarThrottleEnabled || vehFarThrottleSimThisCall)
-        {
-            vehFarThrottleInvisibleFarDelta = vehInvisibleFarCarryDelta;
-            simulateFarTimedByType(_vehicles._invisibleFar, vehInvisibleFarCarryDelta, SimulateInvisibleFar,
-                                   vehListSimVehInvisibleFarMs, vehInvisibleFarTypeMs);
-            vehInvisibleFarCarryDelta = 0.0f;
-        }
-        else
-        {
-            vehFarThrottleSkippedInvisibleFar = _vehicles._invisibleFar.Size();
-        }
+        simulateFarTimedByType(_vehicles._invisibleFar, SimulateInvisibleFar, vehListSimVehInvisibleFarMs,
+                               vehInvisibleFarTypeMs, vehInvisibleFarCarryDelta, true);
 
         simulateTimed(_animals._visibleNear, deltaT, SimulateVisibleNear, vehListSimAnimalVisibleNearMs);
         simulateTimed(_animals._visibleFar, deltaT, SimulateVisibleFar, vehListSimAnimalVisibleFarMs);
@@ -1147,12 +1293,27 @@ void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insi
         static int vehListDetailSumIfShipCount = 0;
         static int vehListDetailSumIfOtherCount = 0;
 
-        static int vehListDetailSumFarThrottleRun = 0;
-        static int vehListDetailSumFarThrottleSkip = 0;
+        static int vehListDetailSumFarThrottleRanVisibleFar = 0;
+        static int vehListDetailSumFarThrottleRanInvisibleFar = 0;
         static int vehListDetailSumFarThrottleSkippedVisibleFar = 0;
         static int vehListDetailSumFarThrottleSkippedInvisibleFar = 0;
         static float vehListDetailSumFarThrottleVisibleFarDelta = 0.0f;
         static float vehListDetailSumFarThrottleInvisibleFarDelta = 0.0f;
+
+        static int vehListDetailSumSkippedVfMan = 0;
+        static int vehListDetailSumSkippedVfTank = 0;
+        static int vehListDetailSumSkippedVfApc = 0;
+        static int vehListDetailSumSkippedVfCar = 0;
+        static int vehListDetailSumSkippedVfAir = 0;
+        static int vehListDetailSumSkippedVfShip = 0;
+        static int vehListDetailSumSkippedVfOther = 0;
+        static int vehListDetailSumSkippedIfMan = 0;
+        static int vehListDetailSumSkippedIfTank = 0;
+        static int vehListDetailSumSkippedIfApc = 0;
+        static int vehListDetailSumSkippedIfCar = 0;
+        static int vehListDetailSumSkippedIfAir = 0;
+        static int vehListDetailSumSkippedIfShip = 0;
+        static int vehListDetailSumSkippedIfOther = 0;
 
         vehListDetailCalls++;
         vehListDetailSumMoveVehiclesPreMs += vehListMoveVehiclesPreMs;
@@ -1221,18 +1382,27 @@ void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insi
         vehListDetailSumIfShipCount += vehInvisibleFarTypeMs.shipCount;
         vehListDetailSumIfOtherCount += vehInvisibleFarTypeMs.otherCount;
 
-        if (vehFarThrottleEnabled && vehFarThrottleSimThisCall)
-        {
-            vehListDetailSumFarThrottleRun++;
-        }
-        else if (vehFarThrottleEnabled)
-        {
-            vehListDetailSumFarThrottleSkip++;
-        }
+        vehListDetailSumFarThrottleRanVisibleFar += vehFarThrottleRanVisibleFar;
+        vehListDetailSumFarThrottleRanInvisibleFar += vehFarThrottleRanInvisibleFar;
         vehListDetailSumFarThrottleSkippedVisibleFar += vehFarThrottleSkippedVisibleFar;
         vehListDetailSumFarThrottleSkippedInvisibleFar += vehFarThrottleSkippedInvisibleFar;
         vehListDetailSumFarThrottleVisibleFarDelta += vehFarThrottleVisibleFarDelta;
         vehListDetailSumFarThrottleInvisibleFarDelta += vehFarThrottleInvisibleFarDelta;
+
+        vehListDetailSumSkippedVfMan += vehFarThrottleSkippedVisibleFarMan;
+        vehListDetailSumSkippedVfTank += vehFarThrottleSkippedVisibleFarTank;
+        vehListDetailSumSkippedVfApc += vehFarThrottleSkippedVisibleFarApc;
+        vehListDetailSumSkippedVfCar += vehFarThrottleSkippedVisibleFarCar;
+        vehListDetailSumSkippedVfAir += vehFarThrottleSkippedVisibleFarAir;
+        vehListDetailSumSkippedVfShip += vehFarThrottleSkippedVisibleFarShip;
+        vehListDetailSumSkippedVfOther += vehFarThrottleSkippedVisibleFarOther;
+        vehListDetailSumSkippedIfMan += vehFarThrottleSkippedInvisibleFarMan;
+        vehListDetailSumSkippedIfTank += vehFarThrottleSkippedInvisibleFarTank;
+        vehListDetailSumSkippedIfApc += vehFarThrottleSkippedInvisibleFarApc;
+        vehListDetailSumSkippedIfCar += vehFarThrottleSkippedInvisibleFarCar;
+        vehListDetailSumSkippedIfAir += vehFarThrottleSkippedInvisibleFarAir;
+        vehListDetailSumSkippedIfShip += vehFarThrottleSkippedInvisibleFarShip;
+        vehListDetailSumSkippedIfOther += vehFarThrottleSkippedInvisibleFarOther;
 
         if (vehListDetailCalls >= 120)
         {
@@ -1310,15 +1480,38 @@ void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insi
                      (int)(vehListDetailSumIfOtherCount * invCalls));
 
             LOG_INFO(World,
-                     "PERF veh far throttle: enabled {}, modulo {}, ran {}, skipped {}, skippedVF {}, skippedIF {}, avgRunDelta VF {:.3f}s IF {:.3f}s",
+                     "PERF veh far throttle: enabled {}, policy man {}, tank {}, apc {}, car {}, air {}, ship {}, other {} | ran VF {}, IF {}, skipped VF {}, IF {}, avgRunDelta VF {:.3f}s IF {:.3f}s",
                      vehFarThrottleEnabled ? 1 : 0,
-                     FarVehicleThrottleModulo,
-                     vehListDetailSumFarThrottleRun,
-                     vehListDetailSumFarThrottleSkip,
-                     (int)(vehListDetailSumFarThrottleSkippedVisibleFar * invCalls),
-                     (int)(vehListDetailSumFarThrottleSkippedInvisibleFar * invCalls),
-                     vehListDetailSumFarThrottleRun > 0 ? vehListDetailSumFarThrottleVisibleFarDelta / vehListDetailSumFarThrottleRun : 0.0f,
-                     vehListDetailSumFarThrottleRun > 0 ? vehListDetailSumFarThrottleInvisibleFarDelta / vehListDetailSumFarThrottleRun : 0.0f);
+                     FarVehicleThrottleManModulo,
+                     FarVehicleThrottleTankModulo,
+                     FarVehicleThrottleApcModulo,
+                     FarVehicleThrottleCarModulo,
+                     FarVehicleThrottleAirModulo,
+                     FarVehicleThrottleShipModulo,
+                     FarVehicleThrottleOtherModulo,
+                     vehListDetailSumFarThrottleRanVisibleFar,
+                     vehListDetailSumFarThrottleRanInvisibleFar,
+                     vehListDetailSumFarThrottleSkippedVisibleFar,
+                     vehListDetailSumFarThrottleSkippedInvisibleFar,
+                     vehListDetailSumFarThrottleRanVisibleFar > 0 ? vehListDetailSumFarThrottleVisibleFarDelta / vehListDetailSumFarThrottleRanVisibleFar : 0.0f,
+                     vehListDetailSumFarThrottleRanInvisibleFar > 0 ? vehListDetailSumFarThrottleInvisibleFarDelta / vehListDetailSumFarThrottleRanInvisibleFar : 0.0f);
+
+            LOG_INFO(World,
+                     "PERF veh far throttle skipped type: VF man {}, tank {}, apc {}, car {}, air {}, ship {}, other {} | IF man {}, tank {}, apc {}, car {}, air {}, ship {}, other {}",
+                     (int)(vehListDetailSumSkippedVfMan * invCalls),
+                     (int)(vehListDetailSumSkippedVfTank * invCalls),
+                     (int)(vehListDetailSumSkippedVfApc * invCalls),
+                     (int)(vehListDetailSumSkippedVfCar * invCalls),
+                     (int)(vehListDetailSumSkippedVfAir * invCalls),
+                     (int)(vehListDetailSumSkippedVfShip * invCalls),
+                     (int)(vehListDetailSumSkippedVfOther * invCalls),
+                     (int)(vehListDetailSumSkippedIfMan * invCalls),
+                     (int)(vehListDetailSumSkippedIfTank * invCalls),
+                     (int)(vehListDetailSumSkippedIfApc * invCalls),
+                     (int)(vehListDetailSumSkippedIfCar * invCalls),
+                     (int)(vehListDetailSumSkippedIfAir * invCalls),
+                     (int)(vehListDetailSumSkippedIfShip * invCalls),
+                     (int)(vehListDetailSumSkippedIfOther * invCalls));
 
             vehListDetailCalls = 0;
             vehListDetailSumMoveVehiclesPreMs = 0.0f;
@@ -1387,12 +1580,27 @@ void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insi
             vehListDetailSumIfShipCount = 0;
             vehListDetailSumIfOtherCount = 0;
 
-            vehListDetailSumFarThrottleRun = 0;
-            vehListDetailSumFarThrottleSkip = 0;
+            vehListDetailSumFarThrottleRanVisibleFar = 0;
+            vehListDetailSumFarThrottleRanInvisibleFar = 0;
             vehListDetailSumFarThrottleSkippedVisibleFar = 0;
             vehListDetailSumFarThrottleSkippedInvisibleFar = 0;
             vehListDetailSumFarThrottleVisibleFarDelta = 0.0f;
             vehListDetailSumFarThrottleInvisibleFarDelta = 0.0f;
+
+            vehListDetailSumSkippedVfMan = 0;
+            vehListDetailSumSkippedVfTank = 0;
+            vehListDetailSumSkippedVfApc = 0;
+            vehListDetailSumSkippedVfCar = 0;
+            vehListDetailSumSkippedVfAir = 0;
+            vehListDetailSumSkippedVfShip = 0;
+            vehListDetailSumSkippedVfOther = 0;
+            vehListDetailSumSkippedIfMan = 0;
+            vehListDetailSumSkippedIfTank = 0;
+            vehListDetailSumSkippedIfApc = 0;
+            vehListDetailSumSkippedIfCar = 0;
+            vehListDetailSumSkippedIfAir = 0;
+            vehListDetailSumSkippedIfShip = 0;
+            vehListDetailSumSkippedIfOther = 0;
         }
     }
 
