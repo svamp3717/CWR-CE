@@ -657,6 +657,13 @@ class Landscape: public SerializeClass
 		int id, const char *shape, const Matrix4 &transform,
 		int *x=nullptr, int *z=nullptr, bool avoidRecalculation = false
 	);
+	// The indexed OPRW loader resolves model shapes once per name-table entry.
+	// Reuse those shapes rather than performing a Shapes.New lookup per instance.
+	Object *ObjectCreate
+	(
+		int id, LODShapeWithShadow *shape, const Matrix4 &transform,
+		int *x=nullptr, int *z=nullptr, bool avoidRecalculation = false
+	);
 	void ObjectDestroy( int id );
 	void ObjectMove( int id, const Matrix4 &transform );
 	void ObjectTypeChange( int id, const char *shape );
