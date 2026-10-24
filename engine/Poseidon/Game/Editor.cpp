@@ -212,20 +212,9 @@ void EditCursor::InitVirtual(CameraType camType, float& heading, float& dive, fl
     Vehicle::InitVirtual(camType, heading, dive, fov);
 }
 
-void EditCursor::CheckMouseSelection(Point3& ptMin, Point3& ptMax)
+void EditCursor::CheckMouseSelection(Point3& ptMin, Point3& ptMax, bool updateSelection)
 {
     int i;
-
-    m_MouseSelection.Init(INIT_SEL_ITEMS);
-    if (m_bCtrl)
-    {
-        for (i = 0; i < m_Selection.Size(); i++)
-        {
-            m_MouseSelection.Add(m_Selection[i]);
-        }
-    }
-
-    Landscape* land = GLOB_LAND;
 
     ptMin.Init();
     ptMax.Init();
@@ -247,6 +236,20 @@ void EditCursor::CheckMouseSelection(Point3& ptMin, Point3& ptMax)
         ptMin[2] = ptMax[2];
         ptMax[2] = pom;
     }
+
+    // The bounds are needed for the drag outline every frame, but scanning
+    // potentially millions of WRP cells is only necessary when it changes.
+    if (!updateSelection)
+        return;
+
+    m_MouseSelection.Init(INIT_SEL_ITEMS);
+    if (m_bCtrl)
+    {
+        for (i = 0; i < m_Selection.Size(); i++)
+            m_MouseSelection.Add(m_Selection[i]);
+    }
+
+    Landscape* land = GLOB_LAND;
     int nXMin = toIntFloor(ptMin.X() * InvObjGrid);
     int nXMax = toIntFloor(ptMax.X() * InvObjGrid);
     int nZMin = toIntFloor(ptMin.Z() * InvObjGrid);
@@ -1057,7 +1060,9 @@ void EditCursor::Simulate(float deltaT, SimulationImportance prec)
                 Matrix4Val rotY = Matrix4(MRotationY, _heading);
                 offset.SetRotate(rotY, offset);
                 m_ptCurrent += offset;
-                CheckMouseSelection(ptMin, ptMax);
+                // Keep the selection outline current, but reuse the previous
+                // object selection while the cursor is stationary.
+                CheckMouseSelection(ptMin, ptMax, xOffset != 0 || zOffset != 0);
                 position = m_ptCurrent;
             }
             break;
