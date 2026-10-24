@@ -356,6 +356,11 @@ bool WrpReader::LoadOPRW(QIStream& f, bool deferObjects)
 
     // Read object name index (TransferBasicArray)
     sf.TransferBasicArray(_objectNames);
+    if (sf.GetError() != SerializeBinStream::EOK || f.fail())
+    {
+        _error = "Failed to read OPRW object name table";
+        return false;
+    }
 
     // Terrain loading can initialize the landscape first and consume objects one by
     // one from the original stream, rather than retaining millions of temporary
