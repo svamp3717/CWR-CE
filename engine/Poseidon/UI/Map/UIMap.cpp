@@ -4,6 +4,7 @@
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/UI/Map/UIMap.hpp>
 #include <Poseidon/UI/Map/MapIconDensity.hpp>
+#include <Poseidon/UI/Map/MapElevationLabels.hpp>
 #include <Poseidon/UI/Controls/CursorLayout.hpp>
 #include <Poseidon/UI/LayoutCanvas.hpp>
 #include <Poseidon/UI/Locale/Stringtable/CodepageTranscode.hpp>
@@ -633,115 +634,9 @@ static const float ptsPerSquareObj = 10;   // other objects
 static const float ptsPerSquareObjLod = 15;
 
 } // namespace Poseidon
-#include <Poseidon/Foundation/Containers/QuadtreeCont.hpp>
 namespace Poseidon
 {
 
-struct DetectCircle
-{
-    int _x;
-    int _z;
-    int _radius;
-
-    DetectCircle(int x, int z, int radius) : _x(x), _z(z), _radius(radius) {}
-    bool operator()(int x, int z, int size) const
-    {
-        // calculate distance of rectangle center from our center
-        int centerX = x + (size >> 1);
-        int centerZ = z + (size >> 1);
-
-        float dist2 = Square(centerX - _x) + Square(centerZ - _z);
-        // check if we can quickly reject or quickly accept
-        if (dist2 < Square(_radius + size))
-        {
-            // part of the circle is certainly contained in the rectangle
-            return true;
-        }
-        if (dist2 > Square(_radius + size) * 2)
-        {
-            // circle is certianly of of the rectangle
-            return false;
-        }
-        // circle may or may not be in the rectangle
-        // we can perform stricter check, or we can return true and provide
-        // some superfluous items
-        return true;
-    }
-};
-
-struct MountainInfo : public Vector3
-{
-    int _index;
-    bool operator==(const MountainInfo& with) const { return _index == with._index; }
-    MountainInfo() { _index = -1; }
-    MountainInfo(Vector3Par pos, int index) : Vector3(pos), _index(index) {}
-
-    int GetX() const { return toLargeInt(X()); }
-    int GetY() const { return toLargeInt(Z()); }
-};
-
-struct SkipNear
-{
-    MountainInfo _pos;
-    // bool _skipped;
-    float _minDist;
-    SkipNear(MountainInfo pos, float minDist) : _pos(pos), _minDist(minDist) {}
-    bool operator()(const MountainInfo& arg) const
-    {
-        // check if the mountain is near enough
-        // check if the mountain is higher
-        if (arg._index >= _pos._index)
-        {
-            return false;
-        }
-        float dist2 = _pos.DistanceXZ2(arg);
-        return dist2 < Square(_minDist);
-    }
-};
-
-struct MountainRegion
-{
-    // in
-    float _xMin, _xMax;
-    float _zMin, _zMax;
-
-    bool operator()(int x, int y, int size) const
-    {
-        float xMin = x, xMax = x + size;
-        float zMin = y, zMax = y + size;
-        bool ret = true;
-        if (_xMin > xMax)
-        {
-            ret = false;
-        }
-        if (_xMax < xMin)
-        {
-            ret = false;
-        }
-        if (_zMin > zMax)
-        {
-            ret = false;
-        }
-        if (_zMax < zMin)
-        {
-            ret = false;
-        }
-        // LOG_DEBUG(UI, "Testing {},{}:{}, result {}",x,y,size,ret);
-        return ret;
-    }
-};
-
-struct MountainList
-{
-    // out
-    AutoArray<int> _indices;
-
-    bool operator()(const MountainInfo& pos)
-    {
-        _indices.Add(pos._index);
-        return false;
-    }
-};
 
 void CStaticMap::DrawBackground()
 {
@@ -1038,72 +933,25 @@ void CStaticMap::DrawBackground()
         Fail("Class <Names> expected");
     }
 
-#if 1
+    // Island-wide zooms can show tens of thousands of mountain heights. Their
+    // labels are subpixel clutter and the original code built a quadtree of
+    // *every* mountain on every frame. Hide labels at overview scale, and for
+    // closer views use fixed-size screen buckets with neighbour separation.
+    // The map's actual terrain contours remain visible at every zoom level.
+    if (MapDraw::ShowElevationLabels(ptsLand))
     {
-        // mountains
-        QuadTreeCont<MountainInfo> mountainPos;
-
         const AutoArray<Vector3>& mountains = GLandscape->GetMountains();
-        for (int i = 0; i < mountains.Size(); i++)
+        MapDraw::ElevationLabelGrid labels(_clipRect.x, _clipRect.y, _clipRect.w, _clipRect.h);
+        for (int i = 0; i < mountains.Size(); ++i)
         {
             const Vector3& pos = mountains[i];
-            // check if given pos is in the visible range
-            int x = toLargeInt(pos.X());
-            int z = toLargeInt(pos.Z());
-
-            mountainPos.Set(x, z, MountainInfo(pos, i));
-        }
-
-        MountainRegion region;
-        Vector3 minPos = ScreenToWorld(Point2DFloat(_x, _y));
-        Vector3 maxPos = ScreenToWorld(Point2DFloat(_x + _w, _y + _h));
-        region._xMin = floatMin(minPos.X(), maxPos.X());
-        region._zMin = floatMin(minPos.Z(), maxPos.Z());
-        region._xMax = floatMax(minPos.X(), maxPos.X());
-        region._zMax = floatMax(minPos.Z(), maxPos.Z());
-
-        MountainList list;
-
-        mountainPos.ForEachInRegion(region, list);
-
-        float minDistF = 1000 * _scaleX;
-        int minDist = toLargeInt(1000 * _scaleX) + 2;
-        for (int ii = 0; ii < list._indices.Size(); ii++)
-        {
-            int i = list._indices[ii];
-            // make space based query
-            const Vector3& pos = mountains[i];
-
-            int x = toLargeInt(pos.X());
-            int z = toLargeInt(pos.Z());
-            SkipNear ctx(MountainInfo(pos, i), minDistF);
-
-            if (!mountainPos.ForEachInRegion(DetectCircle(x, z, minDist), ctx))
-            {
+            const DrawCoord pt = WorldToScreen(pos);
+            const int px = toIntFloor(pt.x * _wScreen);
+            const int py = toIntFloor(pt.y * _hScreen);
+            if (labels.TryAdd(px, py))
                 DrawMount(pos);
-            }
         }
     }
-#else
-    // mountains
-    const AutoArray<Vector3>& mountains = GLandscape->GetMountains();
-    float minDist2 = Square(1000 * _scaleX);
-    for (int i = 0; i < mountains.Size(); i++)
-    {
-        const Vector3& pos = mountains[i];
-        bool skip = false;
-        for (int j = 0; j < i; j++)
-        {
-            if (pos.DistanceXZ2(mountains[j]) < minDist2)
-            {
-                skip = true;
-                break;
-            }
-        }
-        if (!skip)
-            DrawMount(pos);
-    }
-#endif
 }
 
 void CStaticMap::DrawLegend()
