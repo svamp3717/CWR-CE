@@ -48,7 +48,7 @@ bool WrpReader::Load(const char* path)
     return Load(f);
 }
 
-bool WrpReader::Load(QIStream& f)
+bool WrpReader::Load(QIStream& f, bool deferObjects)
 {
     // Read first 4 bytes to detect format
     int magic = 0;
@@ -66,7 +66,7 @@ bool WrpReader::Load(QIStream& f)
     else if (magic == FILE_MAGIC_4)
         return LoadRVW(f, 4);
     else if (magic == OPRW_MAGIC)
-        return LoadOPRW(f);
+        return LoadOPRW(f, deferObjects);
 
     _error = "Unknown file format";
     return false;
@@ -80,7 +80,7 @@ bool WrpReader::LoadRVW(QIStream& f, int version)
     f.read(&zRange, sizeof(zRange));
     // Cap the grid: xRange/zRange are attacker-controlled and drive xRange*zRange
     // heightmap allocations (the product overflows int into a huge/negative alloc).
-    if (f.fail() || xRange <= 0 || zRange <= 0 || xRange > 2048 || zRange > 2048)
+    if (f.fail() || xRange <= 0 || zRange <= 0 || xRange > 8192 || zRange > 8192)
     {
         _error = "Bad grid dimensions";
         return false;
@@ -205,7 +205,7 @@ bool WrpReader::LoadRVW(QIStream& f, int version)
 
 // OPRW format (serialized) — from Landscape::Serialize()
 
-bool WrpReader::LoadOPRW(QIStream& f)
+bool WrpReader::LoadOPRW(QIStream& f, bool deferObjects)
 {
     // Magic already consumed by Load(). SerializeBinStream::Version() reads
     // the magic int, so we need to construct the stream from the beginning.
@@ -239,7 +239,7 @@ bool WrpReader::LoadOPRW(QIStream& f)
         // Grid dimensions are attacker-controlled; reject absurd values before they
         // drive the _gridX*_gridZ*4 array allocations below (the product overflows int
         // into a huge/negative allocation). Real terrains are far below this cap.
-        if (_gridX < 1 || _gridZ < 1 || _gridX > 2048 || _gridZ > 2048)
+        if (_gridX < 1 || _gridZ < 1 || _gridX > 8192 || _gridZ > 8192)
         {
             _error = "OPRW grid dimensions out of range";
             return false;
@@ -357,35 +357,76 @@ bool WrpReader::LoadOPRW(QIStream& f)
     // Read object name index (TransferBasicArray)
     sf.TransferBasicArray(_objectNames);
 
-    // Read objects
+    // Terrain loading can initialize the landscape first and consume objects one by
+    // one from the original stream, rather than retaining millions of temporary
+    // WrpObjectInfo entries alongside the game's Object instances.
+    if (deferObjects)
+        return true;
+
     for (;;)
     {
-        // The object list has no count and ends at id < 0. Also stop at end of input:
-        // LoadInt at EOF returns 0 (>= 0) without advancing, so the loop would grow
-        // _objects forever. Break once fewer than one int remains (rest sits at 1-3 at
-        // EOF, so checking <= 0 is not enough).
-        if (sf.GetRest() < static_cast<int>(sizeof(int)))
-            break;
-        int id = sf.LoadInt();
-        if (id < 0)
-            break;
-
-        int nameIndex = sf.LoadInt();
-        Matrix4 trans;
-        sf.Transfer(trans);
-
         WrpObjectInfo info;
-        info.id = id;
-        if (nameIndex >= 0 && nameIndex < _objectNames.Size())
-            info.name = _objectNames[nameIndex];
-        info.transform = trans;
-        info.position = Vector3(trans.Position().X(), trans.Position().Y(), trans.Position().Z());
-        info.heading = 0;
-        info.hasMatrix = true;
+        ObjectReadResult result = ReadNextOPRWObject(f, info);
+        if (result == ObjectReadResult::End)
+            break;
+        if (result == ObjectReadResult::Error)
+            return false;
         _objects.Add(info);
     }
 
     return true;
+}
+
+WrpReader::ObjectReadResult WrpReader::ReadNextOPRWObject(QIStream& f, WrpObjectInfo& info)
+{
+    // The legacy format terminates with a negative ID. Some old files reach EOF
+    // instead; accepting exactly EOF preserves that compatibility.
+    if (f.rest() == 0)
+        return ObjectReadResult::End;
+    if (f.rest() < static_cast<int>(sizeof(int)))
+    {
+        _error = "Truncated OPRW object ID";
+        return ObjectReadResult::Error;
+    }
+
+    SerializeBinStream sf(&f);
+    const int id = sf.LoadInt();
+    if (id < 0)
+        return ObjectReadResult::End;
+    // A sparse hostile ID is used as an array index by the game loader. Reject
+    // it before any allocation or object construction (same bound as SerializeBin).
+    if (id > (16 << 20))
+    {
+        _error = "OPRW object ID out of range";
+        return ObjectReadResult::Error;
+    }
+    if (f.rest() < static_cast<int>(sizeof(int) + sizeof(Matrix4P)))
+    {
+        _error = "Truncated OPRW object";
+        return ObjectReadResult::Error;
+    }
+
+    const int nameIndex = sf.LoadInt();
+    if (nameIndex < 0 || nameIndex >= _objectNames.Size())
+    {
+        _error = "OPRW object name index out of range";
+        return ObjectReadResult::Error;
+    }
+    Matrix4 trans;
+    sf.Transfer(trans);
+    if (f.fail())
+    {
+        _error = "Truncated OPRW object transform";
+        return ObjectReadResult::Error;
+    }
+
+    info.id = id;
+    info.name = _objectNames[nameIndex];
+    info.transform = trans;
+    info.position = Vector3(trans.Position().X(), trans.Position().Y(), trans.Position().Z());
+    info.heading = 0;
+    info.hasMatrix = true;
+    return ObjectReadResult::Object;
 }
 
 } // namespace Poseidon
