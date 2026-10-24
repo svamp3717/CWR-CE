@@ -212,7 +212,7 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
                 break; // object list terminated
             }
             int id = NewObjectID();
-            ObjectCreate(id, so.name, ConvertToM(so.matrix));
+            ObjectCreate(id, so.name, ConvertToM(so.matrix), nullptr, nullptr, true);
         }
         else
         {
@@ -245,7 +245,7 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
                 isID[so.id] = true;
             }
             PoseidonAssert(so.id >= 0);
-            ObjectCreate(so.id, so.name, ConvertToM(so.matrix));
+            ObjectCreate(so.id, so.name, ConvertToM(so.matrix), nullptr, nullptr, true);
         }
 
         // A very large WRP can have millions of objects. Updating the UI for
@@ -1664,7 +1664,7 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
         GFileServer->Request(obj.name, 1.0f);
 #endif
         int x, z;
-        Object* o = ObjectCreate(obj.id, obj.name, obj.transform, &x, &z);
+        Object* o = ObjectCreate(obj.id, obj.name, obj.transform, &x, &z, true);
 
         idCache.Access(obj.id);
         if (idCache[obj.id])
