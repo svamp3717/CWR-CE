@@ -5,6 +5,7 @@
 #include <Poseidon/World/Terrain/WrpReader.hpp>
 #include "test_fixtures.hpp"
 #include <stdio.h>
+#include <cstring>
 #include <catch2/catch_message.hpp>
 #include <string>
 #include <vector>
@@ -234,4 +235,31 @@ TEST_CASE("WRP: truncated deferred OPRW object fails rather than partially loadi
     REQUIRE(reader.ReadNextOPRWObject(stream, object) == WrpReader::ObjectReadResult::Object);
     REQUIRE(reader.ReadNextOPRWObject(stream, object) == WrpReader::ObjectReadResult::Error);
     REQUIRE(reader.GetError() != nullptr);
+}
+
+TEST_CASE("WRP: grids larger than 2048 are accepted but oversized grids are rejected", "[Formats][WRP]")
+{
+    auto makeHeader = [](int grid)
+    {
+        std::vector<char> bytes(12);
+        memcpy(bytes.data(), "4WVR", 4);
+        memcpy(bytes.data() + 4, &grid, sizeof(grid));
+        memcpy(bytes.data() + 8, &grid, sizeof(grid));
+        return bytes;
+    };
+
+    // This intentionally omits the heightmap. A 4096x4096 map should get as far
+    // as the heightmap read rather than failing the old 2048-dimension guard.
+    auto supported = makeHeader(4096);
+    QIStream supportedStream(supported.data(), static_cast<int>(supported.size()));
+    WrpReader supportedReader;
+    REQUIRE_FALSE(supportedReader.Load(supportedStream));
+    REQUIRE(std::string(supportedReader.GetError()) == "Failed to read heightmap");
+
+    // Still reject impractical grids before allocating for a corrupt header.
+    auto oversized = makeHeader(16384);
+    QIStream oversizedStream(oversized.data(), static_cast<int>(oversized.size()));
+    WrpReader oversizedReader;
+    REQUIRE_FALSE(oversizedReader.Load(oversizedStream));
+    REQUIRE(std::string(oversizedReader.GetError()) == "Bad grid dimensions");
 }
