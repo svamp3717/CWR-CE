@@ -1730,8 +1730,7 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     const DWORD objectsFinished = Poseidon::Foundation::GlobalTickCount();
     LOG_INFO(World, "WRP OPRW: decode {} ms, terrain {} ms", parsedAt - wrpStarted, objectsStarted - parsedAt);
     LOG_INFO(World, "WRP OPRW: objects {} ms, total objects {}", objectsFinished - objectsStarted, objectsLoaded);
-    LOG_INFO(World, "WRP OPRW: unique shapes {} / {} indexed names", uniqueShapesLoaded,
-             reader.GetObjectNameCount());
+    LOG_INFO(World, "WRP OPRW: unique shapes {} / {} indexed names", uniqueShapesLoaded, reader.GetObjectNameCount());
     ProgressFinish();
     return true;
 }
