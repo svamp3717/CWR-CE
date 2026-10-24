@@ -36,7 +36,12 @@ class WrpReader
 
     bool Load(const char* path);
 
-    bool Load(QIStream& f);
+    // The game can defer object parsing until the landscape is allocated, avoiding
+    // a second in-memory copy of every object in large OPRW worlds.
+    bool Load(QIStream& f, bool deferObjects = false);
+
+    enum class ObjectReadResult { Object, End, Error };
+    ObjectReadResult ReadNextOPRWObject(QIStream& f, WrpObjectInfo& object);
 
     Format GetFormat() const { return _format; }
     const char* GetFormatName() const;
@@ -76,7 +81,7 @@ class WrpReader
 
   private:
     bool LoadRVW(QIStream& f, int version);
-    bool LoadOPRW(QIStream& f);
+    bool LoadOPRW(QIStream& f, bool deferObjects);
 
     Format _format = Unknown;
     int _gridX = 0, _gridZ = 0;
