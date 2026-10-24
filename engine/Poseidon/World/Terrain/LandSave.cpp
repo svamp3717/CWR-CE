@@ -99,8 +99,8 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
     const int range = header.xRange;
     const int64_t cells = static_cast<int64_t>(range) * header.zRange;
     const int64_t minBytes = cells * (2 * sizeof(short)) + LAND_TEXTURES_MAX * 32;
-    if (range <= 0 || range > 8192 || header.zRange != range || (range & (range - 1)) != 0 ||
-        minBytes > f.rest())
+    const bool validGrid = range > 0 && range <= 8192 && header.zRange == range && (range & (range - 1)) == 0;
+    if (!validGrid || minBytes > f.rest())
     {
         RptF("Invalid or truncated WRP terrain grid: %d x %d", header.xRange, header.zRange);
         return LSUnknownError;
