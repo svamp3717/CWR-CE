@@ -29,6 +29,8 @@
 
 #include <time.h>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <cstdio>
 #include <stdint.h>
 #include <string.h>
@@ -52,6 +54,15 @@
 
 // #define LAND_TEXTURES_MAX 256
 #define LAND_TEXTURES_MAX 512
+
+namespace
+{
+struct WrpModelHash
+{
+    using is_transparent = void;
+    size_t operator()(std::string_view name) const noexcept { return std::hash<std::string_view>{}(name); }
+};
+} // namespace
 
 namespace Poseidon
 {
@@ -170,6 +181,20 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
     bool isID[maxID];
     memset(isID, 0, sizeof(isID));
 
+    // Cache RVW3/RVW4 model shapes for the duration of the import. Repeated
+    // tree/rock names can occur millions of times, yet each distinct model
+    // only needs one Shapes.New lookup. string_view avoids a temporary string
+    // allocation for every placement.
+    std::unordered_map<std::string, Ref<LODShapeWithShadow>, WrpModelHash, std::equal_to<>> shapeCache;
+    auto resolveShape = [&](const char* name) -> LODShapeWithShadow*
+    {
+        const auto existing = shapeCache.find(std::string_view(name));
+        if (existing != shapeCache.end())
+            return existing->second;
+        Ref<LODShapeWithShadow> shape = Shapes.New(name, false, true);
+        return shapeCache.emplace(name, shape).first->second;
+    };
+
     // load all objects
     // bool someForest=false;
     int countObjects = 0;
@@ -204,12 +229,13 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
             {
                 break;
             }
+            so.name[sizeof(so.name) - 1] = 0;
             if (!*so.name)
             {
                 break; // object list terminated
             }
             int id = NewObjectID();
-            ObjectCreate(id, so.name, ConvertToM(so.matrix), nullptr, nullptr, true);
+            ObjectCreate(id, resolveShape(so.name), ConvertToM(so.matrix), nullptr, nullptr, true);
         }
         else
         {
@@ -219,6 +245,7 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
             {
                 break;
             }
+            so.name[sizeof(so.name) - 1] = 0;
             if (!*so.name)
             {
                 break; // object list terminated
@@ -242,7 +269,7 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
                 isID[so.id] = true;
             }
             PoseidonAssert(so.id >= 0);
-            ObjectCreate(so.id, so.name, ConvertToM(so.matrix), nullptr, nullptr, true);
+            ObjectCreate(so.id, resolveShape(so.name), ConvertToM(so.matrix), nullptr, nullptr, true);
         }
 
         // A very large WRP can have millions of objects. Updating the UI for
@@ -254,6 +281,7 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
         }
     }
     LOG_DEBUG(World, "Total {} objects, max. id {}", countObjects, maxObjID);
+    LOG_INFO(World, "WRP RVW: {} distinct model shapes", shapeCache.size());
 
     ProgressFrame();
 
