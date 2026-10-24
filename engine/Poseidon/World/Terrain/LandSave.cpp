@@ -1599,10 +1599,6 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
         return false;
     }
 
-    ProgressReset();
-    ProgressStart(LocalizeString(IDS_LOAD_WORLD));
-    Init();
-
     int lx = reader.GetGridX();
     int ly = reader.GetGridZ();
     int rx = reader.GetTerrainX();
@@ -1614,6 +1610,10 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
         RptF("LoadOptimized: unsupported terrain grid %d x %d / %d x %d", lx, ly, rx, ry);
         return false;
     }
+
+    ProgressReset();
+    ProgressStart(LocalizeString(IDS_LOAD_WORLD));
+    Init();
     Dim(lx, ly, rx, ry, landGrid);
     SetLandGrid(50);
     FlushCache();
@@ -1657,6 +1657,7 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
         if (result == WrpReader::ObjectReadResult::Error)
         {
             RptF("WrpReader: %s", reader.GetError() ? reader.GetError() : "invalid object");
+            ProgressFinish();
             return false;
         }
 #if _ENABLE_CHEATS
