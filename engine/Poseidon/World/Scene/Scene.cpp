@@ -846,8 +846,7 @@ void Scene::ObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip)
                     return;
                 }
             }
-            invisible = true;
-        }
+        invisible = true;
     }
 
     // calculate distance
