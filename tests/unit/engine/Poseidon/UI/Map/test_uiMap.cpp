@@ -50,14 +50,20 @@ TEST_CASE("Map elevation labels do not overlap across screen cell boundaries", "
 {
     Poseidon::MapDraw::ElevationLabelGrid grid(10, 20, 320, 150);
 
-    CHECK_FALSE(grid.TryAdd(9, 25));     // outside viewport
+    // outside viewport
+    CHECK_FALSE(grid.TryAdd(9, 25));
     CHECK_FALSE(grid.TryAdd(15, 19));
     CHECK(grid.TryAdd(98, 55));
-    CHECK_FALSE(grid.TryAdd(100, 56));   // adjacent bucket, same screen footprint
-    CHECK_FALSE(grid.TryAdd(175, 60));   // close horizontally and vertically
-    CHECK(grid.TryAdd(190, 60));         // far enough to read
-    CHECK(grid.TryAdd(101, 90));         // separate row
-    CHECK_FALSE(grid.TryAdd(330, 170));  // outside viewport
+    // adjacent bucket, same screen footprint
+    CHECK_FALSE(grid.TryAdd(100, 56));
+    // close horizontally and vertically
+    CHECK_FALSE(grid.TryAdd(175, 60));
+    // far enough to read
+    CHECK(grid.TryAdd(190, 60));
+    // separate row
+    CHECK(grid.TryAdd(101, 90));
+    // outside viewport
+    CHECK_FALSE(grid.TryAdd(330, 170));
 }
 
 TEST_CASE("Map elevation label budget is bounded by viewport size", "[UI][Map][Performance]")
