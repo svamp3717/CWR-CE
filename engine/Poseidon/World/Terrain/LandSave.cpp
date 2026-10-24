@@ -94,7 +94,18 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
         return LSUnknownError;
     }
 
-    Dim(header.xRange, header.zRange, header.xRange, header.zRange, landGrid);
+    // The terrain storage and world math require a square power-of-two grid.
+    // Validate the wire dimensions and remaining bytes before any large allocations.
+    const int range = header.xRange;
+    const int64_t cells = static_cast<int64_t>(range) * header.zRange;
+    const int64_t minBytes = cells * (2 * sizeof(short)) + LAND_TEXTURES_MAX * 32;
+    if (range <= 0 || range > 8192 || header.zRange != range || (range & (range - 1)) != 0 ||
+        minBytes > f.rest())
+    {
+        RptF("Invalid or truncated WRP terrain grid: %d x %d", header.xRange, header.zRange);
+        return LSUnknownError;
+    }
+    Dim(range, range, range, range, landGrid);
 
     FlushCache();
 
@@ -237,8 +248,13 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
             ObjectCreate(so.id, so.name, ConvertToM(so.matrix));
         }
 
-        ProgressSetRest(f.rest());
-        ProgressRefresh();
+        // A very large WRP can have millions of objects. Updating the UI for
+        // every 96-byte record makes loading disproportionately slow.
+        if ((countObjects & 1023) == 0)
+        {
+            ProgressSetRest(f.rest());
+            ProgressRefresh();
+        }
     }
     LOG_DEBUG(World, "Total {} objects, max. id {}", countObjects, maxObjID);
 
@@ -263,18 +279,22 @@ int Landscape::LoadData(const char* name, float landGrid)
     // FIX - allow worlds in banks
     QIFStreamB f;
     f.AutoOpen(name);
-    int seekStart = f.tellg();
-    if (f.fail())
+    // Only OPRW uses the optimized reader. Reading an RVW world through
+    // WrpReader first would allocate a second copy of *every* world object,
+    // then throw it away before the legacy loader reads the same 750 MB again.
+    // Inspect just the magic and dispatch directly to the correct loader.
+    char magic[4] = {};
+    if (!f.fail())
     {
-    }
-    else if (LoadOptimized(f, landGrid))
-    {
-        ret = LSOK;
-    }
-    else
-    {
-        f.seekg(seekStart, QIOS::beg);
-        ret = LoadData(f, landGrid);
+        f.read(magic, sizeof(magic));
+        if (!f.fail())
+        {
+            f.seekg(0, QIOS::beg);
+            if (memcmp(magic, "OPRW", sizeof(magic)) == 0)
+                ret = LoadOptimized(f, landGrid) ? LSOK : LSUnknownError;
+            else
+                ret = LoadData(f, landGrid);
+        }
     }
     if (ret != LSOK)
     {
@@ -1567,7 +1587,7 @@ void Landscape::SerializeBin(SerializeBinStream& f, float landGrid)
 bool Landscape::LoadOptimized(QIStream& f, float landGrid)
 {
     WrpReader reader;
-    if (!reader.Load(f))
+    if (!reader.Load(f, true))
     {
         RptF("WrpReader: %s", reader.GetError() ? reader.GetError() : "unknown error");
         return false;
@@ -1587,6 +1607,13 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     int ly = reader.GetGridZ();
     int rx = reader.GetTerrainX();
     int ry = reader.GetTerrainZ();
+    // Landscape::Dim requires a square power-of-two terrain whose heightmap
+    // matches its land cells. Don't let malformed OPRW headers violate that.
+    if (lx != ly || rx != ry || lx != rx || (lx & (lx - 1)) != 0)
+    {
+        RptF("LoadOptimized: unsupported terrain grid %d x %d / %d x %d", lx, ly, rx, ry);
+        return false;
+    }
     Dim(lx, ly, rx, ry, landGrid);
     SetLandGrid(50);
     FlushCache();
@@ -1615,21 +1642,26 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
 
     ProgressRefresh();
 
-    // Create objects from reader data (names already resolved by WrpReader)
-#if _ENABLE_CHEATS
-    for (int i = 0; i < reader.GetObjectCount(); i++)
-    {
-        const auto& obj = reader.GetObject(i);
-        GFileServer->Request(obj.name, 1.0f);
-    }
-#endif
-
+    // The reader leaves the stream at the first OPRW object. Construct objects
+    // directly instead of retaining another enormous AutoArray<WrpObjectInfo>.
     AutoArray<InitPtr<Object>> idCache;
     AutoArray<AutoArray<InitPtr<Object>>> conflicts;
+    int objectsLoaded = 0;
 
-    for (int i = 0; i < reader.GetObjectCount(); i++)
+    for (;;)
     {
-        const auto& obj = reader.GetObject(i);
+        WrpObjectInfo obj;
+        WrpReader::ObjectReadResult result = reader.ReadNextOPRWObject(f, obj);
+        if (result == WrpReader::ObjectReadResult::End)
+            break;
+        if (result == WrpReader::ObjectReadResult::Error)
+        {
+            RptF("WrpReader: %s", reader.GetError() ? reader.GetError() : "invalid object");
+            return false;
+        }
+#if _ENABLE_CHEATS
+        GFileServer->Request(obj.name, 1.0f);
+#endif
         int x, z;
         Object* o = ObjectCreate(obj.id, obj.name, obj.transform, &x, &z);
 
@@ -1644,7 +1676,9 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
             idCache[obj.id] = o;
         }
 
-        ProgressRefresh();
+        // Throttle progress updates for multi-million-object terrains.
+        if ((++objectsLoaded & 1023) == 0)
+            ProgressRefresh();
     }
 
     // Resolve ID conflicts
