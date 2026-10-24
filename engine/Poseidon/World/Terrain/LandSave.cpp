@@ -61,6 +61,7 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
     ProgressStart(LocalizeString(IDS_LOAD_WORLD));
 
     Log("Begin landscape load (%d KB).", Foundation::MemoryUsed() / 1024);
+    const DWORD wrpStarted = Poseidon::Foundation::GlobalTickCount();
 
     int i;
     int x, z;
@@ -164,6 +165,7 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
         return LSUnknownError;
     }
 
+    const DWORD objectsStarted = Poseidon::Foundation::GlobalTickCount();
     const int maxID = 65536;
     bool isID[maxID];
     memset(isID, 0, sizeof(isID));
@@ -257,7 +259,12 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
 
     Log("Landscape loaded. (%d KB).", Foundation::MemoryUsed() / 1024);
 
+    const DWORD geographyStarted = Poseidon::Foundation::GlobalTickCount();
     InitGeography();
+    const DWORD geographyFinished = Poseidon::Foundation::GlobalTickCount();
+    Log("WRP RVW load phases: terrain=%u ms, objects=%u ms, geography=%u ms, objects=%d",
+        objectsStarted - wrpStarted, geographyStarted - objectsStarted, geographyFinished - geographyStarted,
+        countObjects);
 
     ProgressFinish();
 
@@ -1581,6 +1588,7 @@ void Landscape::SerializeBin(SerializeBinStream& f, float landGrid)
 
 bool Landscape::LoadOptimized(QIStream& f, float landGrid)
 {
+    const DWORD wrpStarted = Poseidon::Foundation::GlobalTickCount();
     WrpReader reader;
     if (!reader.Load(f, true))
     {
@@ -1588,6 +1596,7 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
         return false;
     }
 
+    const DWORD parsedAt = Poseidon::Foundation::GlobalTickCount();
     if (reader.GetFormat() != WrpReader::OPRW_V2 && reader.GetFormat() != WrpReader::OPRW_V3)
     {
         RptF("LoadOptimized: unexpected format %s", reader.GetFormatName());
@@ -1650,6 +1659,7 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     AutoArray<InitPtr<Object>> idCache;
     AutoArray<AutoArray<InitPtr<Object>>> conflicts;
     int objectsLoaded = 0;
+    const DWORD objectsStarted = Poseidon::Foundation::GlobalTickCount();
 
     for (;;)
     {
@@ -1702,6 +1712,9 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
         }
     }
 
+    const DWORD objectsFinished = Poseidon::Foundation::GlobalTickCount();
+    Log("WRP OPRW load phases: decode=%u ms, terrain=%u ms, objects=%u ms, objects=%d",
+        parsedAt - wrpStarted, objectsStarted - parsedAt, objectsFinished - objectsStarted, objectsLoaded);
     ProgressFinish();
     return true;
 }
