@@ -793,34 +793,31 @@ DEFINE_FAST_ALLOCATOR(SortObject)
 
 void Scene::ObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip)
 {
-    // WRP landscapes can contain millions of static objects. The shape lookup
-    // below is costly and unnecessary for objects outside even the conservative
-    // shadow allowance. Test the bounding sphere first while keeping the
-    // camera object exempt, as in the original visibility path.
-    Vector3Val pos = obj->Position();
-    float radius = obj->GetRadius();
-    bool clipped = false;
-    if (obj != GWorld->CameraOn())
-    {
-        clipped = _camera->IsClipped(pos, radius, 1) != 0;
-        if (clipped && _camera->IsClipped(pos, radius + 50, 1))
-        {
-            return;
-        }
-    }
+    LODShapeWithShadow* shape = obj->GetShapeOnPos(obj->Position());
 
-    LODShapeWithShadow* shape = obj->GetShapeOnPos(pos);
+    // some objects may be trivially clipped
+    // get rid of them ...
+    bool invisible = false;
+    Vector3Val pos = obj->Position();
     if (!shape)
     {
         return; // nothing to draw
     }
+    float radius = obj->GetRadius();
+    // get object position in clipping coordinates
 
-    bool invisible = false;
-    if (clipped)
+    if (obj != GWorld->CameraOn())
     {
-            // The main object is outside the frustum, but its shadow may be
-            // visible. Preserve the original shadow-path checks.
+        if (_camera->IsClipped(pos, radius, 1))
+        {
+            // check if shadow is enabled
             if (shape->Special() & NoShadow)
+            {
+                return;
+            }
+            // some invisible objects have visible shadows
+            // simple test - shadow possible
+            if (_camera->IsClipped(pos, radius + 50, 1))
             {
                 return;
             }
@@ -846,7 +843,8 @@ void Scene::ObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip)
                     return;
                 }
             }
-        invisible = true;
+            invisible = true;
+        }
     }
 
     // calculate distance
