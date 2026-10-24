@@ -262,8 +262,9 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
     const DWORD geographyStarted = Poseidon::Foundation::GlobalTickCount();
     InitGeography();
     const DWORD geographyFinished = Poseidon::Foundation::GlobalTickCount();
-    Log("WRP RVW: terrain %u ms, objects %u ms", objectsStarted - wrpStarted, geographyStarted - objectsStarted);
-    Log("WRP RVW: geography %u ms, total objects %d", geographyFinished - geographyStarted, countObjects);
+    LOG_INFO(World, "WRP RVW: terrain {} ms, objects {} ms", objectsStarted - wrpStarted,
+             geographyStarted - objectsStarted);
+    LOG_INFO(World, "WRP RVW: geography {} ms, total objects {}", geographyFinished - geographyStarted, countObjects);
 
     ProgressFinish();
 
@@ -1712,8 +1713,8 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     }
 
     const DWORD objectsFinished = Poseidon::Foundation::GlobalTickCount();
-    Log("WRP OPRW: decode %u ms, terrain %u ms", parsedAt - wrpStarted, objectsStarted - parsedAt);
-    Log("WRP OPRW: objects %u ms, total objects %d", objectsFinished - objectsStarted, objectsLoaded);
+    LOG_INFO(World, "WRP OPRW: decode {} ms, terrain {} ms", parsedAt - wrpStarted, objectsStarted - parsedAt);
+    LOG_INFO(World, "WRP OPRW: objects {} ms, total objects {}", objectsFinished - objectsStarted, objectsLoaded);
     ProgressFinish();
     return true;
 }
