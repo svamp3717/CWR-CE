@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
+#include <Poseidon/IO/Streams/SerializeBin.hpp>
+#include <Poseidon/IO/Serialization/SerializeBinExt.hpp>
 #include <Poseidon/World/Terrain/WrpReader.hpp>
 #include "test_fixtures.hpp"
 #include <stdio.h>
@@ -146,4 +148,90 @@ TEST_CASE("WRP: RVW re-parse after a probe-to-EOF and seekg sees all objects", "
     REQUIRE(fallback.GetFormat() == WrpReader::RVW_V4);
     REQUIRE(fallback.GetObjectCount() == 2);
     REQUIRE(std::string((const char*)fallback.GetObject(0).name) == R"(data3d\dummy0.p3d)");
+}
+
+namespace
+{
+std::vector<char> BuildOprw3Blob()
+{
+    QOStream out;
+    SerializeBinStream sf(&out);
+    out.write("OPRW", 4);
+    sf.SaveInt(3);
+    for (int i = 0; i < 4; ++i)
+        sf.SaveInt(4); // square grid and matching heightmap dimensions
+
+    // 4x4 cells; these small arrays are uncompressed in OPRW.
+    char geography[4 * 4 * 4] = {};
+    char sound[4 * 4] = {};
+    short textureIndices[4 * 4] = {};
+    char random[4 * 4 * 4] = {};
+    float heights[4 * 4] = {};
+    sf.SaveCompressed(geography, sizeof(geography));
+    sf.SaveCompressed(sound, sizeof(sound));
+    sf.SaveInt(0); // no mountain peaks
+    sf.SaveCompressed(textureIndices, sizeof(textureIndices));
+    sf.SaveCompressed(random, sizeof(random));
+    sf.SaveCompressed(heights, sizeof(heights));
+
+    sf.SaveInt(1); // texture table
+    RStringB textureName = R"(landtext\mo.pac)";
+    sf.Transfer(textureName);
+    bool enableUV = false;
+    sf.Transfer(enableUV);
+
+    sf.SaveInt(1); // object name table
+    RStringB objectName = R"(data3d\dummy.p3d)";
+    sf.Transfer(objectName);
+
+    Matrix4 transform; // each serialized transform is a fixed-size Matrix4P
+    for (int id : {7, 9})
+    {
+        sf.SaveInt(id);
+        sf.SaveInt(0); // index into object name table
+        sf.Transfer(transform);
+    }
+    sf.SaveInt(-1); // object terminator
+
+    return std::vector<char>(out.str(), out.str() + out.pcount());
+}
+} // namespace
+
+TEST_CASE("WRP: OPRW can read object records incrementally", "[Formats][WRP]")
+{
+    const auto blob = BuildOprw3Blob();
+
+    QIStream eagerStream(blob.data(), static_cast<int>(blob.size()));
+    WrpReader eager;
+    REQUIRE(eager.Load(eagerStream));
+    REQUIRE(eager.GetObjectCount() == 2);
+
+    QIStream stream(blob.data(), static_cast<int>(blob.size()));
+    WrpReader reader;
+    REQUIRE(reader.Load(stream, true));
+    REQUIRE(reader.GetFormat() == WrpReader::OPRW_V3);
+    REQUIRE(reader.GetHeightmapSize() == 16);
+    REQUIRE(reader.GetObjectCount() == 0); // no duplicated in-memory object list
+    WrpObjectInfo object;
+    REQUIRE(reader.ReadNextOPRWObject(stream, object) == WrpReader::ObjectReadResult::Object);
+    CHECK(object.id == 7);
+    CHECK(std::string(object.name) == R"(data3d\dummy.p3d)");
+    REQUIRE(reader.ReadNextOPRWObject(stream, object) == WrpReader::ObjectReadResult::Object);
+    CHECK(object.id == 9);
+    REQUIRE(reader.ReadNextOPRWObject(stream, object) == WrpReader::ObjectReadResult::End);
+}
+
+TEST_CASE("WRP: truncated deferred OPRW object fails rather than partially loading", "[Formats][WRP]")
+{
+    auto blob = BuildOprw3Blob();
+    blob.resize(blob.size() - sizeof(Matrix4P) - sizeof(int)); // remove final transform and terminator
+
+    QIStream stream(blob.data(), static_cast<int>(blob.size()));
+    WrpReader reader;
+    REQUIRE(reader.Load(stream, true));
+
+    WrpObjectInfo object;
+    REQUIRE(reader.ReadNextOPRWObject(stream, object) == WrpReader::ObjectReadResult::Object);
+    REQUIRE(reader.ReadNextOPRWObject(stream, object) == WrpReader::ObjectReadResult::Error);
+    REQUIRE(reader.GetError() != nullptr);
 }
