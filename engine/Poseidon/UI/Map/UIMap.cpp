@@ -636,8 +636,6 @@ static const float ptsPerSquareObjLod = 15;
 } // namespace Poseidon
 namespace Poseidon
 {
-
-
 void CStaticMap::DrawBackground()
 {
     float invLandRange = 1.0 / LandRange;
