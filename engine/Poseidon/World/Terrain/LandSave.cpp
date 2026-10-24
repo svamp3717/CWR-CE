@@ -109,14 +109,9 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
 
     FlushCache();
 
-    for (z = 0; z < _landRange; z++)
-    {
-        for (x = 0; x < _landRange; x++)
-        {
-            SetTex(x, z, 0);
-            SetData(x, z, 0);
-        }
-    }
+    // The two arrays are completely overwritten by the next two loops.
+    // Clearing every cell first is a wasted pass over huge 4096/8192 WRP
+    // terrain grids (and needlessly dirties the renderer heightmap).
     for (z = 0; z < header.zRange; z++)
     {
         for (x = 0; x < header.xRange; x++)
@@ -1624,11 +1619,19 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     memcpy(_tex.RawData(), reader.GetTexIndices().Data(), reader.GetTexIndices().Size());
     memcpy(_random.RawData(), reader.GetRandom().Data(), reader.GetRandom().Size());
 
-    // Copy heightmap into _data
-    const float* heights = reader.GetHeightmapData();
-    for (int z = 0; z < ly; z++)
-        for (int x = 0; x < lx; x++)
-            SetData(x, z, heights[z * lx + x]);
+    // RawType is float in this renderer, so both arrays have the same
+    // layout. Copy the heightmap once rather than calling SetData for
+    // every cell of a multi-million-sample WRP.
+    static_assert(sizeof(RawType) == sizeof(float), "OPRW raw terrain layout must be float");
+    const int heightBytes = reader.GetHeightmapSize() * static_cast<int>(sizeof(float));
+    if (heightBytes != _data.RawSize())
+    {
+        RptF("LoadOptimized: heightmap size does not match terrain grid");
+        ProgressFinish();
+        return false;
+    }
+    memcpy(_data.RawData(), reader.GetHeightmapData(), heightBytes);
+    _heightmapDirty = true;
 
     // Copy mountains
     _mountains = reader.GetMountains();
