@@ -2649,10 +2649,25 @@ int ObjectListFull::Add(Object* object, bool avoidRecalculation)
     int index = base::Add(object);
     if (object->Static())
     {
-        if (!avoidRecalculation)
+        if (avoidRecalculation)
+        {
+            // Bulk WRP imports must not rescan an increasingly large cell after
+            // every inserted object. Grow its conservative culling sphere in
+            // constant time instead; it contains every static object and can
+            // still be tightened later by StaticChanged().
+            const float radius = object->Position().Distance(_bCenter) + object->GetRadius();
+            saturateMax(_bRadius, radius);
+        }
+        else
         {
             StaticChanged();
         }
+    }
+    else if (avoidRecalculation)
+    {
+        // ChangeNonStaticCount verifies by scanning the whole cell, which is
+        // quadratic when importing a large number of non-static objects.
+        ++_nNonStatic;
     }
     else
     {
