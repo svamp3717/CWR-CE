@@ -106,6 +106,10 @@ TEST_CASE("Bulk WRP object insertion expands cell bounds without rescanning", "[
     // The old per-object StaticChanged() rescanned the whole cell after
     // every inserted tree/rock/building: O(n^2) for a dense 750 MB island.
     // The incremental bound must still contain every inserted static object.
+    // ObjectListFull(x, z) reads the global LandGrid while placing its cell
+    // center, so it requires a live landscape just like the other tests here.
+    Landscape landscape(nullptr, nullptr);
+    GlobalLandscapeScope globalLandscape(&landscape);
     ObjectListFull list(0, 0);
     list.SetBSphere(VZero, 50);
 
