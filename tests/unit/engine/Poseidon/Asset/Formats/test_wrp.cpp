@@ -216,9 +216,11 @@ TEST_CASE("WRP: OPRW can read object records incrementally", "[Formats][WRP]")
     WrpObjectInfo object;
     REQUIRE(reader.ReadNextOPRWObject(stream, object) == WrpReader::ObjectReadResult::Object);
     CHECK(object.id == 7);
+    CHECK(object.nameIndex == 0);
     CHECK(std::string(object.name) == R"(data3d\dummy.p3d)");
     REQUIRE(reader.ReadNextOPRWObject(stream, object) == WrpReader::ObjectReadResult::Object);
     CHECK(object.id == 9);
+    CHECK(object.nameIndex == 0); // both placements reuse one indexed model
     REQUIRE(reader.ReadNextOPRWObject(stream, object) == WrpReader::ObjectReadResult::End);
 }
 
