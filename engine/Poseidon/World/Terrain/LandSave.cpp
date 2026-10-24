@@ -1654,6 +1654,14 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
 
     ProgressRefresh();
 
+    // OPRW uses an indexed model-name table. Resolve each shape on its first
+    // instance and keep it alive for the remainder of the import instead of
+    // repeating Shapes.New (and dev-mode asset requests) for every placement.
+    // Huge islands can contain millions of objects but few unique P3D names.
+    AutoArray<Ref<LODShapeWithShadow>> shapeCache;
+    shapeCache.Resize(reader.GetObjectNameCount());
+    int uniqueShapesLoaded = 0;
+
     // The reader leaves the stream at the first OPRW object. Construct objects
     // directly instead of retaining another enormous AutoArray<WrpObjectInfo>.
     AutoArray<InitPtr<Object>> idCache;
@@ -1673,11 +1681,18 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
             ProgressFinish();
             return false;
         }
+        // ReadNextOPRWObject already validated this index against the name table.
+        Ref<LODShapeWithShadow>& shape = shapeCache[obj.nameIndex];
+        if (!shape)
+        {
 #if _ENABLE_CHEATS
-        GFileServer->Request(obj.name, 1.0f);
+            GFileServer->Request(obj.name, 1.0f);
 #endif
+            shape = Shapes.New(obj.name, false, true);
+            ++uniqueShapesLoaded;
+        }
         int x, z;
-        Object* o = ObjectCreate(obj.id, obj.name, obj.transform, &x, &z, true);
+        Object* o = ObjectCreate(obj.id, shape, obj.transform, &x, &z, true);
 
         idCache.Access(obj.id);
         if (idCache[obj.id])
@@ -1715,6 +1730,8 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     const DWORD objectsFinished = Poseidon::Foundation::GlobalTickCount();
     LOG_INFO(World, "WRP OPRW: decode {} ms, terrain {} ms", parsedAt - wrpStarted, objectsStarted - parsedAt);
     LOG_INFO(World, "WRP OPRW: objects {} ms, total objects {}", objectsFinished - objectsStarted, objectsLoaded);
+    LOG_INFO(World, "WRP OPRW: unique shapes {} / {} indexed names", uniqueShapesLoaded,
+             reader.GetObjectNameCount());
     ProgressFinish();
     return true;
 }
