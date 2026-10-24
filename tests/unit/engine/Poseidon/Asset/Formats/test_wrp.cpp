@@ -184,7 +184,7 @@ std::vector<char> BuildOprw3Blob()
     RStringB objectName = R"(data3d\dummy.p3d)";
     sf.Transfer(objectName);
 
-    Matrix4 transform; // each serialized transform is a fixed-size Matrix4P
+    Matrix4 transform(MScale, 1.0f); // valid identity transform, serialized as Matrix4P
     for (int id : {7, 9})
     {
         sf.SaveInt(id);
