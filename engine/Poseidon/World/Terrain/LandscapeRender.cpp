@@ -1751,7 +1751,14 @@ void Landscape::DrawRoadWays(const LandBegEnd& bigRect, Scene& scene)
         mesh->PrepareTextures(Square(floatMax(distance, 0.f)), 0);
         // IsOnSurface matches the model road/decal render state and bias.
         // No object instances are created; the shape holds generated vertices.
+        // Shape::Draw's software fallback routes translucent OnSurface
+        // geometry to the blend pass. Select that pass explicitly here,
+        // since terrain draws outside the normal object-pass scheduler.
+        const SectionClassFilter priorFilter = GSectionFilter;
+        GSectionFilter = mesh->HasBlendSections()
+            ? SectionClassFilter::BlendOnly : SectionClassFilter::OpaqueAndCutout;
         mesh->Draw(&GAnimatorDefault, lights, ClipAll, IsOnSurface, identity, identity);
+        GSectionFilter = priorFilter;
     }
 }
 
