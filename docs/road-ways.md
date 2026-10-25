@@ -56,7 +56,10 @@ choose widths and map road texture paths, and write the node/way records.
   sum of its polygon areas, supplies the base asphalt. Distinct narrow
   shoulder, verge, or painted-overlay materials are drawn as separate
   terrain-draped bands so a multi-texture P3D no longer becomes one colour.
-  The generator reconstructs donor UV tiling and offsets instead of
+  Those generated sections also resolve the original
+  `CfgTextureToMaterial` mapping and retain material references through
+  editor-preview transitions. The generator reconstructs donor UV tiling
+  and offsets instead of
   assigning a generic 0–1 mapping. Generated roads use the Shape/material
   rendering path, not the terrain-colour-palette renderer. For the closest
   visual match, specify a `donor=...p3d` rather than a `.paa` or `.pac`
