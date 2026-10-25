@@ -671,9 +671,9 @@ void AppendDonorBandMeshes(std::vector<std::unique_ptr<Shape>>& meshes, Landscap
                     const int prev = static_cast<int>(i - first - 1) * rowSize + k;
                     const int next = static_cast<int>(i - first) * rowSize + k;
                     poly.SetN(3);
-                    poly.Set(0, prev); poly.Set(1, next); poly.Set(2, prev + 1);
+                    poly.Set(0, prev); poly.Set(1, prev + 1); poly.Set(2, next);
                     mesh->AddFace(poly);
-                    poly.Set(0, prev + 1); poly.Set(1, next); poly.Set(2, next + 1);
+                    poly.Set(0, prev + 1); poly.Set(1, next + 1); poly.Set(2, next);
                     mesh->AddFace(poly);
                 }
         }
@@ -919,9 +919,9 @@ void RoadNet::LoadWays(Landscape* land)
                         const int prev = static_cast<int>(i - first - 1) * rowSize + k;
                         const int next = static_cast<int>(i - first) * rowSize + k;
                         poly.SetN(3);
-                        poly.Set(0, prev); poly.Set(1, next); poly.Set(2, prev + 1);
+                        poly.Set(0, prev); poly.Set(1, prev + 1); poly.Set(2, next);
                         mesh->AddFace(poly);
-                        poly.Set(0, prev + 1); poly.Set(1, next); poly.Set(2, next + 1);
+                        poly.Set(0, prev + 1); poly.Set(1, next + 1); poly.Set(2, next);
                         mesh->AddFace(poly);
                     }
             }
