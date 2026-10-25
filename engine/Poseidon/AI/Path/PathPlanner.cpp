@@ -630,7 +630,8 @@ bool AIPathPlanner::StartSearching(AI::ThinkImportance prec, VehicleWithAI* veh,
     Vector3 roadEntry, roadExit;
     if (groundVehicle && !veh->IsCautious() && GRoadNet && GRoadNet->HasWays() &&
         GRoadNet->GetNearestWayPoint(ptStart, 12.f, roadEntry) &&
-        GRoadNet->GetNearestWayPoint(ptEnd, 35.f, roadExit))
+        GRoadNet->GetNearestWayPoint(ptEnd, 35.f, roadExit) &&
+        (roadEntry - roadExit).SquareSizeXZ() > Square(3.f))
     {
         RoadPathArray route;
         if (GRoadNet->SearchPath(roadEntry, roadExit, route, 3.f) && route.Size() >= 2)
@@ -662,8 +663,8 @@ bool AIPathPlanner::StartSearching(AI::ThinkImportance prec, VehicleWithAI* veh,
                 FieldPassing& field = _plan[i];
                 field._x = std::clamp(toIntFloor(p.X() * InvLandGrid), 0, LandRange - 1);
                 field._z = std::clamp(toIntFloor(p.Z() * InvLandGrid), 0, LandRange - 1);
-                field._mode = (i == 0 && approachRoad ||
-                    i == static_cast<int>(goals.size()) - 1 && leaveRoad)
+                field._mode = ((i == 0 && approachRoad) ||
+                    (i == static_cast<int>(goals.size()) - 1 && leaveRoad))
                     ? FieldPassing::Move : FieldPassing::MoveOnRoad;
                 if (i)
                     runningCost += (p - goals[i - 1]).SizeXZ() *
