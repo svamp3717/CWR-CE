@@ -159,6 +159,8 @@ class RoadNet: public RefCount
 	const std::vector<RoadWayMapSegment> &WayMapSegments() const {return _wayMapSegments;}
 
 	bool SearchPath( Vector3Par from, Vector3Par to, RoadPathArray &path, float prec = 0) const;
+	// Reduce fine road links to steering goals without losing road bends.
+	static void SampleWayRoute(const RoadPathArray &route, std::vector<Vector3> &goals);
 	const RoadLink *IsOnRoad( Vector3Par pos, float size ) const;
 	Vector3 GetNearestRoadPoint( Vector3Par pos ) const;
 	inline RoadList &GetRoadList( int xx, int zz ); // used for diags
