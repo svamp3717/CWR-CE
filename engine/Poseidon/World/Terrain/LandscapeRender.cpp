@@ -1708,7 +1708,7 @@ namespace Poseidon
 // Use the same Shape::Draw / material preparation as donor road P3Ds.
 // Drawing road UVs through Landscape::DrawMesh bypasses model materials,
 // making their colours/blending differ even with an identical texture.
-void Landscape::DrawRoadWays(const LandBegEnd& bigRect, Scene& scene, bool blendedPass)
+void Landscape::DrawRoadWays(const LandBegEnd& bigRect, Scene& scene)
 {
     if (!GRoadNet || !GRoadNet->HasWays())
         return;
@@ -1721,12 +1721,6 @@ void Landscape::DrawRoadWays(const LandBegEnd& bigRect, Scene& scene, bool blend
 
     for (const auto& mesh : GRoadNet->WayMeshes())
     {
-        // Road ribbons and donor overlay bands are separate single-texture
-        // shapes. Their opaque and translucent faces must be drawn at the
-        // same stages as original P3D road objects, not chosen once by
-        // HasBlendSections() for the entire landscape draw.
-        if (mesh->HasBlendSections() != blendedPass)
-            continue;
         const Vector3 min = mesh->Min();
         const Vector3 max = mesh->Max();
         if (max.X() < minX || min.X() > maxX || max.Z() < minZ || min.Z() > maxZ)
@@ -1744,8 +1738,8 @@ void Landscape::DrawRoadWays(const LandBegEnd& bigRect, Scene& scene, bool blend
         // geometry to the blend pass. Select that pass explicitly here,
         // since terrain draws outside the normal object-pass scheduler.
         const SectionClassFilter priorFilter = GSectionFilter;
-        GSectionFilter = blendedPass ? SectionClassFilter::BlendOnly
-                                     : SectionClassFilter::OpaqueAndCutout;
+        GSectionFilter = mesh->HasBlendSections()
+            ? SectionClassFilter::BlendOnly : SectionClassFilter::OpaqueAndCutout;
         mesh->Draw(&GAnimatorDefault, lights, ClipAll, IsOnSurface, identity, identity);
         GSectionFilter = priorFilter;
     }
@@ -1799,7 +1793,7 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
             // texture batching can paint terrain on top or multiply blends.
             GEngine->FlushQueues();
             GEngine->EnableReorderQueues(false);
-            DrawRoadWays(bigRect, scene, false); // asphalt/opaque first
+            DrawRoadWays(bigRect, scene);
             GEngine->FlushQueues();
             GEngine->EnableReorderQueues(true);
         }
@@ -1835,18 +1829,6 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
     // draw non-alpha objects
     scene.DrawObjectsAndShadowsPass1();
     Dev::GFrameProfiler().Mark(Dev::FrameProfiler::PhaseDrawLandObjects);
-
-    // Match the legacy P3D road pipeline: alpha-blended asphalt and
-    // shoulder textures are composited after opaque objects and before
-    // the shadow/alpha pass, instead of being painted under opaque models.
-    if (GRoadNet && GRoadNet->HasWays())
-    {
-        GEngine->FlushQueues();
-        GEngine->EnableReorderQueues(false);
-        DrawRoadWays(bigRect, scene, true);
-        GEngine->FlushQueues();
-        GEngine->EnableReorderQueues(true);
-    }
 
 #if LANDDRAW
 #if _ENABLE_CHEATS
