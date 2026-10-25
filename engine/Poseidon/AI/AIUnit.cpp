@@ -2275,16 +2275,29 @@ bool AIUnit::CreateRoadPath(Vector3Val from, Vector3Val to)
     // retain every routed connection as an operative steering point.
     if (_planner && _planner->IsUsingWayRoute() && GRoadNet->HasWays())
     {
+        // Local goals in the 18 m strategic plan are *not* mission
+        // destinations. If Path::End stops at one of these intermediate
+        // goals, LeaderPathPilot reports StepCompleted early. Search to the
+        // actual final waypoint instead, preserving road bends end-to-end.
+        Vector3 finalTarget = to;
+        const int nPlan = _planner->GetPlanSize();
+        if (nPlan > 0)
+            _planner->GetPlanPosition(nPlan - 1, finalTarget);
         Vector3 entry, exit;
         if (GRoadNet->GetNearestWayPoint(from, 12.f, entry) &&
-            GRoadNet->GetNearestWayPoint(to, 35.f, exit) &&
+            GRoadNet->GetNearestWayPoint(finalTarget, 35.f, exit) &&
             (entry - exit).SquareSizeXZ() > Square(3.f))
         {
             roadPath.Clear();
             if (GRoadNet->SearchPath(entry, exit, roadPath, 1.f) && roadPath.Size() >= 2)
             {
+                // Six-metre steering points retain curved roads without
+                // forcing the pilot to scan thousands of 2 m links every
+                // simulation tick. Strategic sampling remains 18 m.
+                std::vector<Vector3> sampled;
+                RoadNet::SampleWayRoute(roadPath, sampled, 6.f);
                 std::vector<Vector3> drive;
-                drive.reserve(static_cast<size_t>(roadPath.Size()) + 4);
+                drive.reserve(sampled.size() + 4);
                 auto appendPoint = [&drive](Vector3Val p)
                 {
                     if (drive.empty() || (drive.back() - p).SquareSizeXZ() > Square(0.2f))
@@ -2292,10 +2305,10 @@ bool AIUnit::CreateRoadPath(Vector3Val from, Vector3Val to)
                 };
                 appendPoint(from);
                 appendPoint(entry);
-                for (int i = 0; i < roadPath.Size(); ++i)
-                    appendPoint(roadPath[i]);
+                for (const Vector3& point : sampled)
+                    appendPoint(point);
                 appendPoint(exit);
-                appendPoint(to);
+                appendPoint(finalTarget);
                 if (drive.size() >= 2)
                 {
                     veh->PerformLock();
@@ -2315,6 +2328,8 @@ bool AIUnit::CreateRoadPath(Vector3Val from, Vector3Val to)
                     _path.SetMaxIndex(maxIndex < 0 || _lastPlan
                         ? _path.Size() : maxIndex);
                     _path.SetOnRoad(true);
+                    LOG_DEBUG(AI, "{}: following procedural way centerline, {} steering points",
+                              (const char*)GetDebugName(), drive.size());
                     return true;
                 }
             }
