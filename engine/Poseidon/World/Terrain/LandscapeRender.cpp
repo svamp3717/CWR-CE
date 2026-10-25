@@ -58,8 +58,12 @@ namespace Poseidon
 SRef<Occlusion>& GetOcclusions();
 extern bool EnableObjOcc;
 
+// Road overlays are model materials, not random terrain-colour swatches.
+// Implemented below after the default model animator is defined.
+static void LightRoadWay(TLVertexTable& table, const LightList& lights, const Shape& mesh);
+
 void Landscape::DrawMesh(Scene& scene, TLVertexTable& table, const Shape& vMesh, Vector3Par offset,
-                         const LandBegEnd& rect, bool isWater)
+                         const LandBegEnd& rect, bool isWater, bool isRoad)
 {
     GTerrainProfile.drawMeshCalls++;
     // exact per-segment clip rejection
@@ -84,7 +88,10 @@ void Landscape::DrawMesh(Scene& scene, TLVertexTable& table, const Shape& vMesh,
     LightList work(true);
     const LightList& lights = scene.SelectLights(bCenter, bRadius, work);
 
-    table.DoLightingColorized(lights, _colorizePalette, vMesh, 0);
+    if (isRoad)
+        LightRoadWay(table, lights, vMesh);
+    else
+        table.DoLightingColorized(lights, _colorizePalette, vMesh, 0);
 
     // there will be many vertices clipped
     // we want vertex mesh and table to grow fast to avoid many allocations
@@ -1145,6 +1152,14 @@ void AnimatorBrightness::GetMaterial(TLMaterial& mat, int index) const
 static AnimatorDefault GAnimatorDefault;
 static AnimatorDefault GAnimatorWater(Color(0.8, 0.8, 0.8));
 
+// P3D road surfaces are lit with a neutral model material. Applying
+// _colorizePalette here would tint their textures with a terrain-cell colour.
+static void LightRoadWay(TLVertexTable& table, const LightList& lights, const Shape& mesh)
+{
+    Matrix4 worldToModel(MIdentity); // generated vertices use world coordinates
+    table.DoLighting(&GAnimatorDefault, worldToModel, lights, mesh, 0);
+}
+
 void Landscape::DrawWater(const LandBegEnd& bigRect, Scene& scene)
 {
     for (int x = bigRect.xBeg; x < bigRect.xEnd; x += LandSegmentSize)
@@ -1725,7 +1740,7 @@ void Landscape::DrawRoadWays(const LandBegEnd& bigRect, Scene& scene)
             continue;
         TLVertexTable table;
         table.DoTransformPoints(&GAnimatorDefault, *mesh, scene.ScaledInvTransform());
-        DrawMesh(scene, table, *mesh, VZero, bigRect, false);
+        DrawMesh(scene, table, *mesh, VZero, bigRect, false, true);
     }
 }
 
