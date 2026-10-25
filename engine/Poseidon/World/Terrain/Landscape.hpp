@@ -692,7 +692,7 @@ class Landscape: public SerializeClass
 	(
 		Scene &scene,
 		TLVertexTable &table, const Shape &vMesh, Vector3Par offset,
-		const LandBegEnd &rect, bool isWater, bool isRoad = false
+		const LandBegEnd &rect, bool isWater
 	);
 
 	Ref<LandSegment> GenerateSegment(const LandBegEnd& rect, bool deferGPU = false);
