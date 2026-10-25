@@ -324,6 +324,7 @@ Vector3 WayPerpendicular(Vector3Par from, Vector3Par to)
 void RoadNet::LoadWays(Landscape* land)
 {
     _waySegments.clear();
+    _wayMapSegments.clear();
     _wayMeshes.clear();
     const char* name = land->GetName();
     if (!name || !*name)
@@ -448,67 +449,86 @@ void RoadNet::LoadWays(Landscape* land)
             continue;
         }
 
+        // Keep original unsampled edges for the 2D map.
+        for (size_t i = 1; i < way.nodes.size(); ++i)
+        {
+            const Vector3 from = nodes.at(way.nodes[i - 1]);
+            const Vector3 to = nodes.at(way.nodes[i]);
+            if ((to - from).SquareSizeXZ() > 0.0001f)
+                _wayMapSegments.push_back({from, to, way.width});
+        }
+
         // Tessellate across road width as well as along the centerline.
         // Two edge-only vertices made the middle of a road cut into hills,
         // even when both edges were draped onto the ground.
         const int across = std::clamp(static_cast<int>(std::ceil(way.width / 1.5f)), 2, 40);
         const int rowSize = across + 1;
-        auto mesh = std::make_unique<Shape>();
-        mesh->Reserve(static_cast<int>(points.size()) * rowSize);
-        mesh->ReserveFaces(static_cast<int>(points.size() - 1) * across * 2);
-        mesh->RegisterTexture(texture, 1.0f);
-
-        Poly poly;
-        poly.Init();
-        poly.SetTexture(texture);
-        poly.SetSpecial(NoClamp | NoZWrite);
-        float distance = 0.f;
-        for (size_t i = 0; i < points.size(); ++i)
+        // Chunk before reaching the legacy 16-bit vertex-index limit.
+        const size_t maxRows = static_cast<size_t>(16000 / rowSize);
+        std::vector<float> uvDistance(points.size(), 0.f);
+        for (size_t i = 1; i < points.size(); ++i)
         {
-            const Vector3 before = i == 0 ? WayPerpendicular(points[0], points[1])
-                : WayPerpendicular(points[i - 1], points[i]);
-            const Vector3 after = i + 1 == points.size() ? before
-                : WayPerpendicular(points[i], points[i + 1]);
-            Vector3 perp = before + after;
-            const float norm = std::sqrt(perp.SquareSizeXZ());
-            if (norm < 1e-4f)
-                perp = after;
-            else
-                perp *= 1.0f / norm;
-            const float dot = std::fabs(perp.X() * after.X() + perp.Z() * after.Z());
-            const float halfWidth = way.width * 0.5f / floatMax(dot, 0.4f);
-            const Vector3 center = points[i];
-            if (i)
-                distance += std::sqrt((points[i].X() - points[i - 1].X()) * (points[i].X() - points[i - 1].X())
-                    + (points[i].Z() - points[i - 1].Z()) * (points[i].Z() - points[i - 1].Z()));
-            const float v = texture->VToPhysical(distance / way.width);
-
-            for (int k = 0; k <= across; ++k)
-            {
-                const float u = static_cast<float>(k) / across;
-                Vector3 pos = center + perp * (halfWidth * (1.f - 2.f * u));
-                float dx = 0.f, dz = 0.f;
-                pos[1] = land->SurfaceY(pos.X(), pos.Z(), &dx, &dz) + RoadWaySurfaceOffset;
-                Vector3 normal(-dx, 1, -dz);
-                normal.Normalize();
-                mesh->AddVertexFast(pos, normal, ClipAll, texture->UToPhysical(u), v);
-            }
-
-            if (i)
-                for (int k = 0; k < across; ++k)
-                {
-                    const int prev = static_cast<int>(i - 1) * rowSize + k;
-                    const int next = static_cast<int>(i) * rowSize + k;
-                    poly.SetN(3);
-                    poly.Set(0, prev); poly.Set(1, next); poly.Set(2, prev + 1);
-                    mesh->AddFace(poly);
-                    poly.Set(0, prev + 1); poly.Set(1, next); poly.Set(2, next + 1);
-                    mesh->AddFace(poly);
-                }
+            const float dx = points[i].X() - points[i - 1].X();
+            const float dz = points[i].Z() - points[i - 1].Z();
+            uvDistance[i] = uvDistance[i - 1] + std::sqrt(dx * dx + dz * dz);
         }
-        mesh->CalculateMinMax();
-        mesh->FindSections(true);
-        _wayMeshes.push_back(std::move(mesh));
+        for (size_t first = 0; first + 1 < points.size(); )
+        {
+            const size_t last = std::min(first + maxRows, points.size()); // exclusive
+            const int rows = static_cast<int>(last - first);
+            auto mesh = std::make_unique<Shape>();
+            mesh->Reserve(rows * rowSize);
+            mesh->ReserveFaces((rows - 1) * across * 2);
+            mesh->RegisterTexture(texture, 1.0f);
+
+            Poly poly;
+            poly.Init();
+            poly.SetTexture(texture);
+            poly.SetSpecial(NoClamp | NoZWrite);
+            for (size_t i = first; i < last; ++i)
+            {
+                const Vector3 before = i == 0 ? WayPerpendicular(points[0], points[1])
+                    : WayPerpendicular(points[i - 1], points[i]);
+                const Vector3 after = i + 1 == points.size() ? before
+                    : WayPerpendicular(points[i], points[i + 1]);
+                Vector3 perp = before + after;
+                const float norm = std::sqrt(perp.SquareSizeXZ());
+                if (norm < 1e-4f)
+                    perp = after;
+                else
+                    perp *= 1.0f / norm;
+                const float dot = std::fabs(perp.X() * after.X() + perp.Z() * after.Z());
+                const float halfWidth = way.width * 0.5f / floatMax(dot, 0.4f);
+                const float v = texture->VToPhysical(uvDistance[i] / way.width);
+
+                for (int k = 0; k <= across; ++k)
+                {
+                    const float u = static_cast<float>(k) / across;
+                    Vector3 pos = points[i] + perp * (halfWidth * (1.f - 2.f * u));
+                    float dx = 0.f, dz = 0.f;
+                    pos[1] = land->SurfaceY(pos.X(), pos.Z(), &dx, &dz) + RoadWaySurfaceOffset;
+                    Vector3 normal(-dx, 1, -dz);
+                    normal.Normalize();
+                    mesh->AddVertexFast(pos, normal, ClipAll, texture->UToPhysical(u), v);
+                }
+
+                if (i > first)
+                    for (int k = 0; k < across; ++k)
+                    {
+                        const int prev = static_cast<int>(i - first - 1) * rowSize + k;
+                        const int next = static_cast<int>(i - first) * rowSize + k;
+                        poly.SetN(3);
+                        poly.Set(0, prev); poly.Set(1, next); poly.Set(2, prev + 1);
+                        mesh->AddFace(poly);
+                        poly.Set(0, prev + 1); poly.Set(1, next); poly.Set(2, next + 1);
+                        mesh->AddFace(poly);
+                    }
+            }
+            mesh->CalculateMinMax();
+            mesh->FindSections(true);
+            _wayMeshes.push_back(std::move(mesh));
+            first = last - 1; // overlap one row for continuous sections
+        }
 
         for (size_t i = 1; i < points.size(); ++i)
         {
