@@ -131,6 +131,10 @@ RoadNet::~RoadNet() = default;
 
 void RoadNet::Scan(Landscape* land)
 {
+    // Array2D::Dim preserves old elements when dimensions match! A rebuild
+    // otherwise keeps dead/duplicate SRef<RoadLink> objects and cross-links
+    // them to new ways, eventually corrupting AI road traversal.
+    _roads.Clear();
     _roads.Dim(LandRange, LandRange);
     // insert all road objects into the road list
     int x, z;
@@ -1356,6 +1360,52 @@ bool RoadNet::IsLocked(Vector3Par pos, float size) const
         }
     }
     return false;
+}
+
+void RoadNet::RefreshWayHeights(Landscape* land)
+{
+    if (!land || _waySegments.empty())
+        return;
+
+    // The editor can modify terrain while units are present. Rebuilding
+    // RoadNet here destroys RoadLink objects that AI still uses. Update only
+    // vertical coordinates and normals: the X/Z road graph stays intact.
+    for (auto& mesh : _wayMeshes)
+    {
+        for (int i = 0; i < mesh->NPos(); ++i)
+        {
+            Vector3& p = mesh->SetPos(i);
+            float dX = 0, dZ = 0;
+            p[1] = land->SurfaceY(p.X(), p.Z(), &dX, &dZ) + RoadWaySurfaceOffset;
+            Vector3 n(-dX, 1, -dZ);
+            n.Normalize();
+            mesh->SetNorm(i) = n;
+        }
+        mesh->CalculateMinMax();
+        mesh->InvalidateBuffer();
+    }
+
+    for (RoadWaySegment& seg : _waySegments)
+    {
+        seg.from[1] = land->SurfaceY(seg.from.X(), seg.from.Z()) + RoadWaySurfaceOffset;
+        seg.to[1] = land->SurfaceY(seg.to.X(), seg.to.Z()) + RoadWaySurfaceOffset;
+    }
+
+    // Existing RoadLinks store positions by value, including extra branch
+    // junction slots. Keep every pointer stable while updating heights.
+    for (int x = 0; x < LandRange; ++x)
+        for (int z = 0; z < LandRange; ++z)
+        {
+            RoadList& list = _roads(x, z);
+            for (int i = 0; i < list.Size(); ++i)
+            {
+                RoadLink* link = list[i];
+                if (!link->IsWay())
+                    continue;
+                // Link endpoints, including added intersection slots.
+                link->UpdateWayHeights(land);
+            }
+        }
 }
 
 void RoadNet::Build(Landscape* land)
