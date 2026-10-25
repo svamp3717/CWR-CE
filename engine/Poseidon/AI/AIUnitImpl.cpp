@@ -1740,8 +1740,10 @@ void AIUnit::OperPath(ThinkImportance prec)
             // whenever the strategic target is marked as on-road.
             // Do not change P3D road AI just because this map also has ways.
             // Only graph-derived procedural plans use the new steering.
-            const bool followWays = _planner->IsUsingWayRoute() &&
-                _planner->GetPlanMode(planIndex) == FieldPassing::MoveOnRoad;
+            // The final waypoint may be just off the road: its field mode
+            // is Move, but the whole route still needs procedural operative
+            // steering until the road exit. Do not revert to DirectExact.
+            const bool followWays = _planner->IsUsingWayRoute();
 
             if (_lastPlan)
             {
