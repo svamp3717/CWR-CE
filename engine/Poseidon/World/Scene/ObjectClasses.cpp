@@ -737,9 +737,11 @@ RoadType::~RoadType() = default;
 DEFINE_FAST_ALLOCATOR(Road)
 DEFINE_CASTING(Road)
 
-Road::Road(LODShapeWithShadow* shape, int id) : Object(shape, id)
+Road::Road(LODShapeWithShadow* shape, int id, RoadType* cachedRoadType) : Object(shape, id)
 {
-    _roadType = RoadTypes.New(shape->Name());
+    // BankArray::New performs a linear name scan. The WRP loader resolves
+    // the shared RoadType once per distinct model rather than on every road.
+    _roadType = cachedRoadType ? cachedRoadType : RoadTypes.New(shape->Name());
     SetType(Network);
     if (shape->GeometryLevel())
     {
@@ -818,7 +820,8 @@ Object* NewObject(LODShapeWithShadow* shape, int id)
     return NewObject(shape, id, nullptr, false);
 }
 
-Object* NewObject(LODShapeWithShadow* shape, int id, EntityType* cachedType, bool typeResolved)
+Object* NewObject(LODShapeWithShadow* shape, int id, EntityType* cachedType, bool typeResolved,
+                  RoadType* cachedRoadType)
 {
     const RStringB& className = shape->GetPropertyClass();
     if (className.GetLength() > 0)
@@ -839,7 +842,7 @@ Object* NewObject(LODShapeWithShadow* shape, int id, EntityType* cachedType, boo
         }
         else if (className == RSB(road))
         {
-            return new Road(shape, id);
+            return new Road(shape, id, cachedRoadType);
         }
         else if (className == RSB(streetlamp))
         {
