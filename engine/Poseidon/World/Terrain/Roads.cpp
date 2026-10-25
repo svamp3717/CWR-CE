@@ -448,9 +448,14 @@ void RoadNet::LoadWays(Landscape* land)
             continue;
         }
 
+        // Tessellate across road width as well as along the centerline.
+        // Two edge-only vertices made the middle of a road cut into hills,
+        // even when both edges were draped onto the ground.
+        const int across = std::clamp(static_cast<int>(std::ceil(way.width / 1.5f)), 2, 40);
+        const int rowSize = across + 1;
         auto mesh = std::make_unique<Shape>();
-        mesh->Reserve(static_cast<int>(points.size() * 2));
-        mesh->ReserveFaces(static_cast<int>((points.size() - 1) * 2));
+        mesh->Reserve(static_cast<int>(points.size()) * rowSize);
+        mesh->ReserveFaces(static_cast<int>(points.size() - 1) * across * 2);
         mesh->RegisterTexture(texture, 1.0f);
 
         Poly poly;
@@ -472,35 +477,34 @@ void RoadNet::LoadWays(Landscape* land)
                 perp *= 1.0f / norm;
             const float dot = std::fabs(perp.X() * after.X() + perp.Z() * after.Z());
             const float halfWidth = way.width * 0.5f / floatMax(dot, 0.4f);
-            Vector3 center = points[i];
-            center[1] = land->SurfaceY(center.X(), center.Z()) + RoadWaySurfaceOffset;
+            const Vector3 center = points[i];
             if (i)
-                distance += std::sqrt((points[i].X() - points[i-1].X()) * (points[i].X() - points[i-1].X())
-                    + (points[i].Z() - points[i-1].Z()) * (points[i].Z() - points[i-1].Z()));
-            Vector3 left = center + perp * halfWidth;
-            Vector3 right = center - perp * halfWidth;
-            // Conform both edges independently on sloped terrain. Sampling
-            // only the centre would leave wide roads floating or buried.
-            float leftDX = 0, leftDZ = 0, rightDX = 0, rightDZ = 0;
-            left[1] = land->SurfaceY(left.X(), left.Z(), &leftDX, &leftDZ) + RoadWaySurfaceOffset;
-            right[1] = land->SurfaceY(right.X(), right.Z(), &rightDX, &rightDZ) + RoadWaySurfaceOffset;
-            Vector3 leftNormal(-leftDX, 1, -leftDZ);
-            Vector3 rightNormal(-rightDX, 1, -rightDZ);
-            leftNormal.Normalize();
-            rightNormal.Normalize();
+                distance += std::sqrt((points[i].X() - points[i - 1].X()) * (points[i].X() - points[i - 1].X())
+                    + (points[i].Z() - points[i - 1].Z()) * (points[i].Z() - points[i - 1].Z()));
             const float v = texture->VToPhysical(distance / way.width);
-            mesh->AddVertexFast(left, leftNormal, ClipAll, texture->UToPhysical(0), v);
-            mesh->AddVertexFast(right, rightNormal, ClipAll, texture->UToPhysical(1), v);
-            if (i)
+
+            for (int k = 0; k <= across; ++k)
             {
-                const int prev = static_cast<int>((i - 1) * 2);
-                const int next = static_cast<int>(i * 2);
-                poly.SetN(3);
-                poly.Set(0, prev); poly.Set(1, next); poly.Set(2, prev + 1);
-                mesh->AddFace(poly);
-                poly.Set(0, prev + 1); poly.Set(1, next); poly.Set(2, next + 1);
-                mesh->AddFace(poly);
+                const float u = static_cast<float>(k) / across;
+                Vector3 pos = center + perp * (halfWidth * (1.f - 2.f * u));
+                float dx = 0.f, dz = 0.f;
+                pos[1] = land->SurfaceY(pos.X(), pos.Z(), &dx, &dz) + RoadWaySurfaceOffset;
+                Vector3 normal(-dx, 1, -dz);
+                normal.Normalize();
+                mesh->AddVertexFast(pos, normal, ClipAll, texture->UToPhysical(u), v);
             }
+
+            if (i)
+                for (int k = 0; k < across; ++k)
+                {
+                    const int prev = static_cast<int>(i - 1) * rowSize + k;
+                    const int next = static_cast<int>(i) * rowSize + k;
+                    poly.SetN(3);
+                    poly.Set(0, prev); poly.Set(1, next); poly.Set(2, prev + 1);
+                    mesh->AddFace(poly);
+                    poly.Set(0, prev + 1); poly.Set(1, next); poly.Set(2, next + 1);
+                    mesh->AddFace(poly);
+                }
         }
         mesh->CalculateMinMax();
         mesh->FindSections(true);
