@@ -7,6 +7,7 @@
 #include <Poseidon/Foundation/Containers/Array2D.hpp>
 #include <Poseidon/Foundation/Containers/StreamArray.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
+#include <Poseidon/Foundation/Framework/AppFrame.hpp>
 #include <Poseidon/Foundation/Math/MathOpt.hpp>
 #include <Poseidon/Foundation/Memory/MemAlloc.hpp>
 
@@ -869,10 +870,18 @@ bool RoadNet::IsLocked(Vector3Par pos, float size) const
 
 void RoadNet::Build(Landscape* land)
 {
+    const DWORD started = Foundation::GlobalTickCount();
     Scan(land);
+    const DWORD scanned = Foundation::GlobalTickCount();
     Connect();
+    const DWORD connected = Foundation::GlobalTickCount();
     Optimize();
+    const DWORD optimized = Foundation::GlobalTickCount();
     Compact();
+    const DWORD finished = Foundation::GlobalTickCount();
+
+    LOG_INFO(World, "WRP roads: scan {} ms, connect {} ms, optimize {} ms, compact {} ms, total {} ms",
+             scanned - started, connected - scanned, optimized - connected, finished - optimized, finished - started);
 }
 
 SRef<RoadNet> GRoadNet; // global instance
