@@ -639,6 +639,10 @@ void RoadNet::Connect()
             for (int i = 0; i < n; i++)
             {
                 RoadLink* item = list[i];
+                // OSM ways connect only through shared endpoints. Do not
+                // snap nearby parallel lanes or grade-separated crossings.
+                if (item->IsWay())
+                    continue;
                 for (int j = 0; j < item->NConnections(); j++)
                 {
                     if (!item->Connections()[j])
@@ -662,7 +666,7 @@ void RoadNet::Connect()
                                 {
                                     // check connection with all connection points of tItem
                                     RoadLink* tItem = tList[ii];
-                                    if (tItem == item)
+                                    if (tItem->IsWay() || tItem == item)
                                     {
                                         continue;
                                     }
@@ -742,6 +746,61 @@ void RoadNet::Connect()
             } // for(i)
         } // for(x,z)
     }
+}
+
+// At a shared OSM node more than two road edges may meet. Legacy connection
+// slots hold one neighbour per endpoint, so add extra slots for each additional
+// branch without inserting junction P3D models.
+void RoadNet::ConnectWayJunctions()
+{
+    if (_waySegments.empty())
+        return;
+    for (int x = 0; x < LandRange; ++x)
+        for (int z = 0; z < LandRange; ++z)
+        {
+            const RoadList& list = _roads(x, z);
+            for (int i = 0; i < list.Size(); ++i)
+            {
+                RoadLink* link = list[i];
+                if (!link->IsWay())
+                    continue;
+                for (int end = 0; end < 2; ++end)
+                {
+                    const Vector3 p = link->PosConnections()[end];
+                    for (int xx = x - 1; xx <= x + 1; ++xx)
+                        for (int zz = z - 1; zz <= z + 1; ++zz)
+                        {
+                            if (!InRange(xx, zz))
+                                continue;
+                            const RoadList& near = _roads(xx, zz);
+                            for (int j = 0; j < near.Size(); ++j)
+                            {
+                                RoadLink* other = near[j];
+                                if (other == link || !other->IsWay())
+                                    continue;
+                                bool sameNode = false;
+                                for (int k = 0; k < 2; ++k)
+                                    if ((p - other->PosConnections()[k]).SquareSizeXZ() < 0.01f * 0.01f)
+                                        sameNode = true;
+                                if (!sameNode)
+                                    continue;
+                                bool aToB = false, bToA = false;
+                                for (int k = 0; k < link->NConnections(); ++k)
+                                    aToB |= link->Connections()[k] == other;
+                                for (int k = 0; k < other->NConnections(); ++k)
+                                    bToA |= other->Connections()[k] == link;
+                                if ((!aToB && link->NConnections() >= link->MaxConnections()) ||
+                                    (!bToA && other->NConnections() >= other->MaxConnections()))
+                                    continue;
+                                if (!aToB)
+                                    link->AddConnection(p, other);
+                                if (!bToA)
+                                    other->AddConnection(p, link);
+                            }
+                        }
+                }
+            }
+        }
 }
 
 void RoadNet::Optimize()
@@ -898,7 +957,11 @@ bool RoadNet::SearchPath(Vector3Par from, Vector3Par to, RoadPathArray& path, fl
     while (true) // search cycle
     {
         bool ok = openList.HeapRemoveFirst(best);
-        if (!ok || ++iter > MAX_ITER)
+        // A generated way can contain thousands of short segments. Keep the
+        // legacy cap for old maps, scale the budget for polyline networks.
+        const int maxIterations = _waySegments.empty() ? MAX_ITER
+            : std::min(200000, std::max(MAX_ITER, static_cast<int>(_waySegments.size()) * 2));
+        if (!ok || ++iter > maxIterations)
         {
             goto PathNotFound;
         }
@@ -1144,6 +1207,7 @@ void RoadNet::Build(Landscape* land)
     Scan(land);
     LoadWays(land);
     Connect();
+    ConnectWayJunctions();
     Optimize();
     Compact();
 }
