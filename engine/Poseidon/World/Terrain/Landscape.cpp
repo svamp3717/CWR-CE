@@ -6,6 +6,7 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/Roads.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Random/randomGen.hpp>
@@ -1743,6 +1744,20 @@ float Landscape::RoadSurfaceY(float xC, float zC, float* dX, float* dZ, Texture*
         }
     }
 
+    // Procedural ways have a terrain-following surface and the very same
+    // Texture object used by the visible ribbon. Legacy raised roadways and
+    // bridges still win when they sit above this surface.
+    Texture* wayTexture = nullptr;
+    const float wayY = landY + 0.08f;
+    if (GRoadNet && GRoadNet->WaySurface(xC, zC, 0.f, &wayTexture) && wayY >= maxY)
+    {
+        if (texture)
+            *texture = wayTexture;
+        if (dX)
+            *dX = sdX, *dZ = sdZ;
+        return wayY;
+    }
+
     if (maxY >= -1e3)
     {
         //_world->GetScene()->DrawCollisionStar(ret);
@@ -1875,6 +1890,20 @@ float Landscape::RoadSurfaceY(Vector3Par pos, float* dX, float* dZ, Texture** te
                 o->Deanimate(lShape->FindRoadwayLevel());
             }
         }
+    }
+
+    Texture* wayTexture = nullptr;
+    const float wayY = landY + 0.08f;
+    if (GRoadNet && pos.Y() >= wayY &&
+        GRoadNet->WaySurface(pos.X(), pos.Z(), 0.f, &wayTexture) && wayY >= maxY)
+    {
+        if (texture)
+            *texture = wayTexture;
+        if (dX)
+            *dX = sdX, *dZ = sdZ;
+        if (obj)
+            *obj = nullptr; // a way is terrain, not an instance of Object
+        return wayY;
     }
 
     if (maxY >= -1e3)
