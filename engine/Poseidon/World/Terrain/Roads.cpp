@@ -1459,9 +1459,9 @@ bool RoadNet::SearchPath(Vector3Par from, Vector3Par to, RoadPathArray& path, fl
                 if (item->IsInside(to, prec))
                 {
                     best = new RoadNode;
-                    container.AddNode(best);
                     best->parent = nullptr;
                     best->road = item;
+                    container.AddNode(best); // key must be initialized before insertion
                     best->pos = to;                                             // item->PosConnections()[jBest];
                     best->cost = item->GetCenter().Distance(to) * COST_NO_ROAD; // * sqrt(minDist2);
                     best->heur = RoadHeur(best->pos, from);
@@ -1546,9 +1546,9 @@ bool RoadNet::SearchPath(Vector3Par from, Vector3Par to, RoadPathArray& path, fl
             else
             {
                 cur = new RoadNode;
-                container.AddNode(cur);
                 cur->parent = best;
                 cur->road = item;
+                container.AddNode(cur); // avoid indexing uninitialized road pointers
                 cur->pos = pos;
                 cur->cost = cost;
                 cur->heur = RoadHeur(pos, from);
