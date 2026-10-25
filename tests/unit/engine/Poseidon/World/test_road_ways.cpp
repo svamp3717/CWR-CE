@@ -122,3 +122,32 @@ TEST_CASE("Six-metre operative road sampling follows a gradual bend", "[World][R
         REQUIRE(distance > 19.f);
     }
 }
+
+TEST_CASE("Procedural ways preserve original P3D alpha ordered clamp material", "[World][RoadWays][Rendering]")
+{
+    // wg_osmways4 road-donors.json describes the donor's original road
+    // polygon flag 0x00024102. Copying only the texture discarded these
+    // flags, changing colors even with the correct donor P3D.
+    constexpr int original = 0x00024102;
+    const int flags = RoadNet::WayFaceFlags(original, true, true);
+    REQUIRE(flags == original);
+    REQUIRE((flags & OnSurface) != 0);
+    REQUIRE((flags & IsAlpha) != 0);
+    REQUIRE((flags & IsAlphaOrdered) != 0);
+    REQUIRE((flags & ClampU) != 0);
+    REQUIRE((flags & NoClamp) == 0);
+    REQUIRE((flags & NoZWrite) == 0);
+
+    // Texture-only .ways entries still use their legacy fallback.
+    REQUIRE(RoadNet::WayFaceFlags(0, false, true) == (NoClamp | NoZWrite | IsAlpha));
+    REQUIRE(RoadNet::WayFaceFlags(0, false, false) == (NoClamp | NoZWrite));
+}
+
+TEST_CASE("Donor road faces cannot inherit hidden or water rendering", "[World][RoadWays][Rendering]")
+{
+    const int flags = RoadNet::WayFaceFlags(ClampU | OnSurface | IsHidden | IsWater, true, false);
+    REQUIRE((flags & ClampU) != 0);
+    REQUIRE((flags & OnSurface) != 0);
+    REQUIRE((flags & IsHidden) == 0);
+    REQUIRE((flags & IsWater) == 0);
+}
