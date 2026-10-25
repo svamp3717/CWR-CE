@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <cmath>
 #include <Poseidon/World/Terrain/Roads.hpp>
 #include <Poseidon/Graphics/Dummy/TextureDummy.hpp>
 
@@ -94,4 +95,30 @@ TEST_CASE("Way route sampling reduces links on a straight road", "[World][RoadWa
     REQUIRE(goals.size() > 5);
     REQUIRE(goals.front().X() == Catch::Approx(0));
     REQUIRE(goals.back().X() == Catch::Approx(200));
+}
+
+TEST_CASE("Six-metre operative road sampling follows a gradual bend", "[World][RoadWays][AI]")
+{
+    // A quarter-circle has no single sharp (>45 degree) vertex, so a
+    // corner-only algorithm would incorrectly shortcut across the grass.
+    RoadPathArray route;
+    constexpr float radius = 20.f;
+    for (int i = 0; i <= 40; ++i)
+    {
+        const float angle = 1.570796327f * static_cast<float>(i) / 40.f;
+        route.Add(Vector3(radius * std::cos(angle), 0, radius * std::sin(angle)));
+    }
+    std::vector<Vector3> goals;
+    RoadNet::SampleWayRoute(route, goals, 6.f);
+    REQUIRE(goals.size() >= 6);
+
+    for (size_t i = 1; i < goals.size(); ++i)
+    {
+        Vector3 midpoint = (goals[i - 1] + goals[i]) * 0.5f;
+        // A start-to-end chord would dip to 14.14m from the circle centre;
+        // six-metre segments remain on the 20m-radius road.
+        const float distance = std::sqrt(midpoint.X() * midpoint.X() +
+                                         midpoint.Z() * midpoint.Z());
+        REQUIRE(distance > 19.f);
+    }
 }
