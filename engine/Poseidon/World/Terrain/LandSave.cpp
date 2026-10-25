@@ -57,6 +57,12 @@
 
 namespace Poseidon
 {
+struct WrpCachedModel
+{
+    Ref<LODShapeWithShadow> shape;
+    EntityType* entityType = nullptr;
+};
+
 LSError Landscape::LoadData(QIStream& f, float landGrid)
 {
     ProgressReset();
@@ -176,14 +182,16 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
     // tree/rock names can occur millions of times, yet each distinct model
     // only needs one Shapes.New lookup. A transparent comparator permits
     // string_view lookups without allocating temporary strings in C++17.
-    std::map<std::string, Ref<LODShapeWithShadow>, std::less<>> shapeCache;
-    auto resolveShape = [&](const char* name) -> LODShapeWithShadow*
+    std::map<std::string, WrpCachedModel, std::less<>> shapeCache;
+    auto resolveShape = [&](const char* name) -> const WrpCachedModel&
     {
         const auto existing = shapeCache.find(std::string_view(name));
         if (existing != shapeCache.end())
             return existing->second;
-        Ref<LODShapeWithShadow> shape = Shapes.New(name, false, true);
-        return shapeCache.emplace(name, shape).first->second;
+        WrpCachedModel model;
+        model.shape = Shapes.New(name, false, true);
+        model.entityType = FindWorldObjectEntityType(model.shape);
+        return shapeCache.emplace(name, std::move(model)).first->second;
     };
 
     // load all objects
@@ -226,7 +234,8 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
                 break; // object list terminated
             }
             int id = NewObjectID();
-            ObjectCreate(id, resolveShape(so.name), ConvertToM(so.matrix), nullptr, nullptr, true);
+            const WrpCachedModel& model = resolveShape(so.name);
+            ObjectCreate(id, model.shape, ConvertToM(so.matrix), nullptr, nullptr, true, model.entityType, true);
         }
         else
         {
@@ -260,7 +269,8 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
                 isID[so.id] = true;
             }
             PoseidonAssert(so.id >= 0);
-            ObjectCreate(so.id, resolveShape(so.name), ConvertToM(so.matrix), nullptr, nullptr, true);
+            const WrpCachedModel& model = resolveShape(so.name);
+            ObjectCreate(so.id, model.shape, ConvertToM(so.matrix), nullptr, nullptr, true, model.entityType, true);
         }
 
         // A very large WRP can have millions of objects. Updating the UI for
@@ -1679,6 +1689,8 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     // Huge islands can contain millions of objects but few unique P3D names.
     AutoArray<Ref<LODShapeWithShadow>> shapeCache;
     shapeCache.Resize(reader.GetObjectNameCount());
+    AutoArray<EntityType*> typeCache;
+    typeCache.Resize(reader.GetObjectNameCount());
     int uniqueShapesLoaded = 0;
 
     // The reader leaves the stream at the first OPRW object. Construct objects
@@ -1708,10 +1720,11 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
             GFileServer->Request(obj.name, 1.0f);
 #endif
             shape = Shapes.New(obj.name, false, true);
+            typeCache[obj.nameIndex] = FindWorldObjectEntityType(shape);
             ++uniqueShapesLoaded;
         }
         int x, z;
-        Object* o = ObjectCreate(obj.id, shape, obj.transform, &x, &z, true);
+        Object* o = ObjectCreate(obj.id, shape, obj.transform, &x, &z, true, typeCache[obj.nameIndex], true);
 
         idCache.Access(obj.id);
         if (idCache[obj.id])
