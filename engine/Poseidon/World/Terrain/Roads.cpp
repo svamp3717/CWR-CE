@@ -427,6 +427,7 @@ struct RoadDonorBand
 {
     RoadDonorAppearance appearance;
     float start = 0, end = 1; // [0..1] across the donor's full roadway
+    Ref<Texture> keepAlive; // donor ShapeBank cache is weak; keep overlay faces alive
 };
 
 // The original donor often consists of asphalt + separate shoulder / verge
@@ -488,7 +489,7 @@ std::vector<RoadDonorBand> FindDonorBands(Shape* shape, Texture* baseTexture)
                 break;
             }
         if (!duplicate && bands.size() < 12)
-            bands.push_back({appearance, start, end});
+            bands.push_back({appearance, start, end, appearance.texture});
     }
     // Wider layers first, narrow markings last.
     std::sort(bands.begin(), bands.end(), [](const RoadDonorBand& a, const RoadDonorBand& b)
