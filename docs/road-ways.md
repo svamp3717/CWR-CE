@@ -56,7 +56,15 @@ choose widths and map road texture paths, and write the node/way records.
   sum of its polygon areas, supplies the base asphalt. Distinct narrow
   shoulder, verge, or painted-overlay materials are drawn as separate
   terrain-draped bands so a multi-texture P3D no longer becomes one colour.
-  Those generated sections also resolve the original
+  Generated faces preserve their donor P3D polygon render flags, including
+  horizontal UV clamping, ordered-alpha blending and on-surface routing.
+  For example, the original `wg_osmways4` donors use `0x00024102`
+  (OnSurface, IsAlpha, ClampU, IsAlphaOrdered). The engine previously replaced
+  this with generic NoClamp/NoZWrite flags, changing the road colours even
+  when the correct donor texture was selected. Separate opaque and translucent
+  generated-road passes now follow the legacy P3D ordering; repeated donor
+  faces using the same texture are not blended over themselves.
+  The generated sections also resolve the original
   `CfgTextureToMaterial` mapping and retain material references through
   editor-preview transitions. The generator reconstructs donor UV tiling
   and offsets instead of
