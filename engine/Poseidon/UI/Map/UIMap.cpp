@@ -961,10 +961,10 @@ void CStaticMap::DrawBackground()
                     j--;
                     y += yStep;
                 }
-                // P3D roads were drawn per object above. Generated roads are
-                // world-space polylines, so render them once per map frame.
-                DrawGeneratedRoads();
             }
+            // Vector roads stay visible even at map scales where scanning
+            // hundreds of thousands of legacy P3D objects is disabled.
+            DrawGeneratedRoads();
             if (ptsLand >= ptsPerSquareObj)
             {
                 // other objects — stride coarsens at zoom-out, where the icons are
