@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <Poseidon/World/Terrain/Roads.hpp>
+#include <Poseidon/Graphics/Dummy/TextureDummy.hpp>
 
 using namespace Poseidon;
 
@@ -38,4 +39,21 @@ TEST_CASE("Generated road links accept multiway junction connections", "[World][
     REQUIRE(a.Connections()[1] == &b);
     REQUIRE(a.Connections()[2] == &c);
     REQUIRE(a.PosConnections()[2].X() == Catch::Approx(20.f));
+}
+
+TEST_CASE("Way road contacts retain the donor roadway material", "[World][RoadWays][Surface]")
+{
+    TextureDummy donorSurface;
+    donorSurface.SetRoughness(0.02f);
+    donorSurface.SetDustness(0.0f);
+
+    RoadLink road(Vector3(5, 0, 5), Vector3(45, 0, 5), 6.f, &donorSurface);
+    REQUIRE(road.WayTexture() == &donorSurface);
+    REQUIRE(road.WayTexture()->Roughness() == Catch::Approx(0.02f));
+    REQUIRE(road.WayTexture()->Dustness() == Catch::Approx(0.0f));
+
+    // This is an X/Z road footprint query; even a deep land-contact point
+    // gets the same roadway texture instead of the terrain's grass texture.
+    REQUIRE(road.IsInside(Vector3(20, -2, 6), 0.f));
+    REQUIRE_FALSE(road.IsInside(Vector3(20, -2, 10), 0.f));
 }
