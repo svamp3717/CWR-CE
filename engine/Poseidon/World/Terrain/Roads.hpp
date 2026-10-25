@@ -142,6 +142,7 @@ class RoadNet: public RefCount
 	void Compact(); // optimize memory picture
 
 	void Build( Landscape *land ); // all steps together
+	void RefreshWayHeights(Landscape *land); // update meshes in place, preserve AI road links
 
 	bool HasWays() const {return !_waySegments.empty();}
 	// Spatial queries and procedural rendering share the exact way data.
