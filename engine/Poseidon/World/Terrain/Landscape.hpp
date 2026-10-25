@@ -571,6 +571,7 @@ class Landscape: public SerializeClass
 
 	// init geography information
 	void InitGeography();
+	void StampWayGeography();
 	void InitMountains();
 	void InitSoundMap();
 	void InitDynSounds( const ParamEntry &entry );
