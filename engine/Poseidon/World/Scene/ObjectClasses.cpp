@@ -820,6 +820,11 @@ Object* NewObject(LODShapeWithShadow* shape, int id)
     return NewObject(shape, id, nullptr, false);
 }
 
+Object* NewObject(LODShapeWithShadow* shape, int id, EntityType* cachedType, bool typeResolved)
+{
+    return NewObject(shape, id, cachedType, typeResolved, nullptr);
+}
+
 Object* NewObject(LODShapeWithShadow* shape, int id, EntityType* cachedType, bool typeResolved,
                   RoadType* cachedRoadType)
 {
