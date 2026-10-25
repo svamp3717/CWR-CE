@@ -219,14 +219,32 @@ float RoadLink::NearestConnectionDist2(Vector3Val pos) const
 
 void RoadLink::AddConnection(Vector3Par pos, RoadLink* con)
 {
-    if (_nCon >= NCon)
+    if (_nCon < NCon)
     {
-        Fail("No more slot to add connection");
-        return;
+        _con[_nCon] = con;
+        _pos[_nCon] = pos;
     }
-    _con[_nCon] = con;
-    _pos[_nCon] = pos;
-    _nCon++;
+    else
+    {
+        if (!_extra)
+        {
+            // The four inline endpoints are enough for most road segments.
+            // Preserve all existing links when a complex intersection needs
+            // additional connections; the old fixed limit silently broke
+            // the reverse link and logged "No more slot to add connection".
+            _extra = std::make_unique<ExtraConnections>();
+            _extra->pos.reserve(NCon * 2);
+            _extra->con.reserve(NCon * 2);
+            for (int i = 0; i < _nCon; ++i)
+            {
+                _extra->pos.push_back(_pos[i]);
+                _extra->con.push_back(_con[i]);
+            }
+        }
+        _extra->pos.push_back(pos);
+        _extra->con.push_back(con);
+    }
+    ++_nCon;
 }
 
 static bool IsConnected(const RoadLink* tItem, const RoadLink* item, int maxDepth)
