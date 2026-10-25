@@ -1748,7 +1748,7 @@ float Landscape::RoadSurfaceY(float xC, float zC, float* dX, float* dZ, Texture*
     // Texture object used by the visible ribbon. Legacy raised roadways and
     // bridges still win when they sit above this surface.
     Texture* wayTexture = nullptr;
-    const float wayY = landY + 0.08f;
+    const float wayY = landY + RoadWaySurfaceOffset;
     if (GRoadNet && GRoadNet->WaySurface(xC, zC, 0.f, &wayTexture) && wayY >= maxY)
     {
         if (texture)
@@ -1893,8 +1893,8 @@ float Landscape::RoadSurfaceY(Vector3Par pos, float* dX, float* dZ, Texture** te
     }
 
     Texture* wayTexture = nullptr;
-    const float wayY = landY + 0.08f;
-    if (GRoadNet && pos.Y() >= wayY &&
+    const float wayY = landY + RoadWaySurfaceOffset;
+    if (GRoadNet && pos.Y() >= wayY - 0.75f &&
         GRoadNet->WaySurface(pos.X(), pos.Z(), 0.f, &wayTexture) && wayY >= maxY)
     {
         if (texture)
