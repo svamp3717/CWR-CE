@@ -363,6 +363,17 @@ void RoadNet::LoadWays(Landscape* land)
             Vector3Val to = it->second;
             const float dx = to.X() - from.X(), dz = to.Z() - from.Z();
             const float length = std::sqrt(dx * dx + dz * dz);
+            if (!std::isfinite(length) || length > 100000.f ||
+                from.X() < 0.f || from.Z() < 0.f ||
+                to.X() < 0.f || to.Z() < 0.f ||
+                from.X() >= land->GetLandRange() * land->GetLandGrid() ||
+                from.Z() >= land->GetLandRange() * land->GetLandGrid() ||
+                to.X() >= land->GetLandRange() * land->GetLandGrid() ||
+                to.Z() >= land->GetLandRange() * land->GetLandGrid())
+            {
+                valid = false;
+                break;
+            }
             if (length < 0.01f)
                 continue;
             const int steps = std::max(1, static_cast<int>(std::ceil(length / floatMin(8.f, land->GetLandGrid() * 0.25f))));
@@ -593,7 +604,7 @@ void RoadNet::Connect()
                                         for (int ii = 0; ii < sCon; ii++)
                                         {
                                             float dist2 = (sPos[ii] - val).SquareSizeXZ();
-                                            if (dist2 < Square(maxDistCon))
+                                            if (!sRoad->Connections()[ii] && dist2 < Square(maxDistCon))
                                             {
 #if DIAGS
                                                 LOG_DEBUG(World, "Connect {:x}:{} - {:x}:{}", (uintptr_t)road, i,
