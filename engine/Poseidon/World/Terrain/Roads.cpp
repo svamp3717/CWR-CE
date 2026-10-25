@@ -319,19 +319,33 @@ RoadDonorAppearance FindDonorTopFace(Shape* shape)
         }
     }
 
-    // Some very old models have reversed visible faces. Fall back only if
-    // there is no upward-facing, textured polygon.
+    // Older P3Ds sometimes reverse the winding of their visible top faces.
+    // Pick the largest horizontal face regardless of winding, not the first
+    // textured face (which might still be an underside/kerb).
     if (!result.texture)
+    {
+        float largestXZArea = 0.f;
         for (Offset face = shape->BeginFaces(); face < shape->EndFaces(); shape->NextFace(face))
         {
             const Poly& polygon = shape->Face(face);
-            if (polygon.GetTexture())
+            if (!polygon.GetTexture() || polygon.N() < 3)
+                continue;
+            const Vector3 origin = shape->Pos(polygon.GetVertex(0));
+            float area = 0.f;
+            for (int k = 2; k < polygon.N(); ++k)
             {
+                const Vector3 a = shape->Pos(polygon.GetVertex(k - 1)) - origin;
+                const Vector3 b = shape->Pos(polygon.GetVertex(k)) - origin;
+                area += std::fabs(a.X() * b.Z() - a.Z() * b.X()) * 0.5f;
+            }
+            if (area > largestXZArea)
+            {
+                largestXZArea = area;
                 result.texture = polygon.GetTexture();
                 result.special = polygon.Special() | shape->Special();
-                break;
             }
         }
+    }
     return result;
 }
 
