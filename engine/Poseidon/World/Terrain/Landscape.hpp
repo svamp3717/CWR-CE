@@ -1011,7 +1011,8 @@ void ClearShapes(); // flush all cached shapes, types ...
 // Resolve costly vehicle-type bank lookups once for each unique WRP model.
 EntityType *FindWorldObjectEntityType(LODShapeWithShadow *shape);
 Object *NewObject( LODShapeWithShadow *shape, int id );
+Object *NewObject( LODShapeWithShadow *shape, int id, EntityType *cachedType, bool typeResolved );
 Object *NewObject( LODShapeWithShadow *shape, int id, EntityType *cachedType, bool typeResolved,
-                   RoadType *cachedRoadType = nullptr );
+                   RoadType *cachedRoadType );
 } // namespace Poseidon
 
