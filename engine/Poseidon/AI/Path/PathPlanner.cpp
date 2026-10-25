@@ -11,7 +11,9 @@
 #include <Poseidon/World/Terrain/Roads.hpp>
 #include <float.h>
 #include <stdlib.h>
+#include <algorithm>
 #include <cmath>
+#include <vector>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Containers/HashMap.hpp>
@@ -631,44 +633,16 @@ bool AIPathPlanner::StartSearching(AI::ThinkImportance prec, VehicleWithAI* veh,
         RoadPathArray route;
         if (GRoadNet->SearchPath(ptStart, ptEnd, route, 8.f) && route.Size() >= 2)
         {
-            // Sample a navigable intermediate goal about every 18 metres,
-            // with additional goals at sharp bends. Each operative leg then
-            // runs the normal road A* and follows all fine (2 m) links.
-            // Retain original XZ coordinates rather than re-snapping goals
-            // to 50 m strategic grid-cell centres.
+            // Reuse the tested centerline sampler rather than dropping
+            // corners when converting a graph path to strategic goals.
+            std::vector<Vector3> goals;
+            RoadNet::SampleWayRoute(route, goals);
+            if (goals.size() < 2)
+                return false;
+
             float totalLength = 0.f;
             for (int i = 1; i < route.Size(); ++i)
                 totalLength += (route[i] - route[i - 1]).SizeXZ();
-            const float step = floatMax(18.f, totalLength / 750.f);
-
-            std::vector<Vector3> goals;
-            goals.reserve(std::min(route.Size(), 850));
-            goals.push_back(route[0]);
-            float sinceGoal = 0.f;
-            for (int i = 1; i + 1 < route.Size(); ++i)
-            {
-                const Vector3 before = route[i] - route[i - 1];
-                const Vector3 after = route[i + 1] - route[i];
-                const float bLen = before.SizeXZ();
-                const float aLen = after.SizeXZ();
-                sinceGoal += bLen;
-                // Do not lose hairpin/intersection geometry when resampling.
-                const bool corner = bLen > 0.1f && aLen > 0.1f &&
-                    (before.X() * after.X() + before.Z() * after.Z()) <
-                    0.7071f * bLen * aLen;
-                if ((sinceGoal >= step || corner) &&
-                    (route[i] - goals.back()).SquareSizeXZ() > Square(3.f))
-                {
-                    goals.push_back(route[i]);
-                    sinceGoal = 0.f;
-                }
-            }
-            const Vector3 destination = route[route.Size() - 1];
-            if ((destination - goals.back()).SquareSizeXZ() < Square(2.f) &&
-                goals.size() > 1)
-                goals.back() = destination;
-            else
-                goals.push_back(destination);
 
             _plan.Resize(static_cast<int>(goals.size()));
             _planPoints.Resize(static_cast<int>(goals.size()));
