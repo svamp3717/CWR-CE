@@ -533,6 +533,7 @@ void Landscape::ResampleTerrain(int sampleStepLog)
     {
         GScene->GetShadowCache().Clear();
     }
+    RefreshWayTerrain();
 }
 
 template <class Type>
@@ -953,6 +954,8 @@ void Landscape::SubdivideTerrain(int subdivStepLog)
         GScene->GetShadowCache().Clear();
     }
 
+    RefreshWayTerrain();
+
     auto elapsed = TerrainProfile::Now() - st0;
     // ~3GHz: cycles/3e6 = ms
     RptF("SubdivideTerrain: %.1f ms, grid=%d range=%d", elapsed / 3e6, _terrainRange, _landRange);
@@ -1031,6 +1034,7 @@ bool Landscape::LoadSubdivCache(int targetSubdivLog)
     if (GScene)
         GScene->GetShadowCache().Clear();
 
+    RefreshWayTerrain();
     LOG_DEBUG(Core, "LOAD: SubdivCache HIT from {}", path);
     return true;
 }
