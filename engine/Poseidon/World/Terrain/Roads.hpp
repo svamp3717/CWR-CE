@@ -163,6 +163,7 @@ class RoadNet: public RefCount
 	static void SampleWayRoute(const RoadPathArray &route, std::vector<Vector3> &goals, float spacing = 18.f);
 	// Preserve donor P3D texture sampling and alpha flags on generated road faces.
 	static int WayFaceFlags(int donorFlags, bool donorProvided, bool blendTexture);
+	static void AddWayQuad(Shape &mesh, Poly &face, int previousRow, int nextRow);
 	const RoadLink *IsOnRoad( Vector3Par pos, float size ) const;
 	Vector3 GetNearestRoadPoint( Vector3Par pos ) const;
 	bool GetNearestWayPoint(Vector3Par pos, float maxDistance, Vector3 &nearest) const;
