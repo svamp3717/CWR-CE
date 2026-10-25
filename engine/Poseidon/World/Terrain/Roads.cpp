@@ -9,6 +9,14 @@
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Math/MathOpt.hpp>
 #include <Poseidon/Foundation/Memory/MemAlloc.hpp>
+#include <Poseidon/IO/Streams/QBStream.hpp>
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace Poseidon
 {
@@ -31,8 +39,34 @@ RoadLink::RoadLink(Object* object, Vector3* pos, int c) : _object(object), _lock
     }
 }
 
+RoadLink::RoadLink(Vector3Par from, Vector3Par to, float width, Texture* texture)
+    : _locks(0), _nCon(2), _wayHalfWidth(width * 0.5f), _wayTexture(texture)
+{
+    _pos[0] = from;
+    _pos[1] = to;
+    for (int i = 0; i < NCon; ++i)
+        _con[i] = nullptr;
+}
+
+// Project in the horizontal plane: generated ways follow terrain rather than
+// a model's roadway LOD. This is also used by the collision surface query.
+static float WayDistance2XZ(float x, float z, Vector3Par from, Vector3Par to)
+{
+    const float dx = to.X() - from.X();
+    const float dz = to.Z() - from.Z();
+    const float len2 = dx * dx + dz * dz;
+    if (len2 <= 1e-8f)
+        return std::numeric_limits<float>::max();
+    const float t = std::clamp(((x - from.X()) * dx + (z - from.Z()) * dz) / len2, 0.0f, 1.0f);
+    const float ox = x - from.X() - t * dx;
+    const float oz = z - from.Z() - t * dz;
+    return ox * ox + oz * oz;
+}
+
 bool RoadLink::IsInside(Vector3Val pos, float size) const
 {
+    if (_wayHalfWidth > 0)
+        return WayDistance2XZ(pos.X(), pos.Z(), _pos[0], _pos[1]) <= Square(_wayHalfWidth + floatMax(size, 0));
     Object* obj = _object;
     if (!obj)
     {
@@ -187,6 +221,262 @@ void RoadNet::Scan(Landscape* land)
             }
         }
     }
+}
+
+namespace
+{
+struct ParsedWay
+{
+    float width;
+    std::string texture;
+    std::vector<long long> nodes;
+};
+
+// OSM-like text sidecar: 'node ID X Z' and
+// 'way ID WIDTH TEXTURE NODE_ID NODE_ID [...]'.
+// References can appear before or after their node declarations.
+bool ReadWayDefinitions(const std::string& data,
+                        std::unordered_map<long long, Vector3>& nodes,
+                        std::vector<ParsedWay>& ways)
+{
+    std::istringstream file(data);
+    std::string line;
+    size_t lineCount = 0;
+    while (std::getline(file, line))
+    {
+        if (++lineCount > 200000 || line.size() > 8192)
+            return false;
+        const size_t comment = line.find('#');
+        if (comment != std::string::npos)
+            line.resize(comment);
+        std::istringstream row(line);
+        std::string type;
+        if (!(row >> type))
+            continue;
+        if (type == "node")
+        {
+            long long id;
+            float x, z;
+            std::string extra;
+            if (!(row >> id >> x >> z) || (row >> extra) ||
+                !std::isfinite(x) || !std::isfinite(z))
+                return false;
+            if (nodes.size() >= 100000 || !nodes.emplace(id, Vector3(x, 0, z)).second)
+                return false;
+        }
+        else if (type == "way")
+        {
+            long long id, nodeId;
+            ParsedWay way;
+            if (!(row >> id >> way.width >> way.texture) ||
+                !std::isfinite(way.width) || way.width < 0.5f || way.width > 50.f)
+                return false;
+            while (row >> nodeId)
+            {
+                if (way.nodes.size() >= 4096)
+                    return false;
+                way.nodes.push_back(nodeId);
+            }
+            if (!row.eof() || way.nodes.size() < 2 || ways.size() >= 10000)
+                return false;
+            ways.push_back(std::move(way));
+        }
+        else
+            return false; // reject typos, never silently drop road definitions
+    }
+    return true;
+}
+
+Vector3 WayPerpendicular(Vector3Par from, Vector3Par to)
+{
+    const float dx = to.X() - from.X();
+    const float dz = to.Z() - from.Z();
+    const float length = std::sqrt(dx * dx + dz * dz);
+    if (length <= 1e-4f)
+        return VZero;
+    return Vector3(-dz / length, 0, dx / length);
+}
+} // namespace
+
+void RoadNet::LoadWays(Landscape* land)
+{
+    _waySegments.clear();
+    _wayMeshes.clear();
+    const char* name = land->GetName();
+    if (!name || !*name)
+        return;
+    std::string path(name);
+    const size_t dot = path.find_last_of('.');
+    if (dot != std::string::npos &&
+        (path.substr(dot) == ".wrp" || path.substr(dot) == ".WRP"))
+        path.resize(dot);
+    path += ".ways";
+    if (!QIFStreamB::FileExist(path.c_str()))
+        return; // maps without sidecars keep their P3D roads unchanged
+
+    QIFStreamB file;
+    file.AutoOpen(path.c_str());
+    if (file.fail())
+        return;
+    const int byteCount = file.rest();
+    if (byteCount <= 0 || byteCount > 8 * 1024 * 1024)
+    {
+        LOG_WARN(World, "Invalid road way file size: {}", path);
+        return;
+    }
+    std::string contents(static_cast<size_t>(byteCount), '\0');
+    file.read(contents.data(), byteCount);
+    if (file.fail())
+    {
+        LOG_WARN(World, "Unable to read road ways: {}", path);
+        return;
+    }
+
+    std::unordered_map<long long, Vector3> nodes;
+    std::vector<ParsedWay> ways;
+    if (!ReadWayDefinitions(contents, nodes, ways))
+    {
+        LOG_WARN(World, "Invalid road way definitions: {}", path);
+        return;
+    }
+
+    // Generate textured terrain-following ribbons and short road links. The
+    // latter join the original P3D links using RoadNet::Connect's endpoint logic.
+    for (const ParsedWay& way : ways)
+    {
+        std::vector<Vector3> points;
+        bool valid = true;
+        for (long long nodeId : way.nodes)
+        {
+            auto it = nodes.find(nodeId);
+            if (it == nodes.end())
+            {
+                valid = false;
+                break;
+            }
+            if (points.empty())
+            {
+                points.push_back(it->second);
+                continue;
+            }
+            Vector3Val from = points.back();
+            Vector3Val to = it->second;
+            const float dx = to.X() - from.X(), dz = to.Z() - from.Z();
+            const float length = std::sqrt(dx * dx + dz * dz);
+            if (length < 0.01f)
+                continue;
+            const int steps = std::max(1, static_cast<int>(std::ceil(length / floatMin(8.f, land->GetLandGrid() * 0.25f))));
+            if (steps > 8192 || points.size() + static_cast<size_t>(steps) > 16000)
+            {
+                valid = false;
+                break;
+            }
+            for (int i = 1; i <= steps; ++i)
+            {
+                const float t = static_cast<float>(i) / steps;
+                points.emplace_back(from.X() + dx * t, 0, from.Z() + dz * t);
+            }
+        }
+        if (!valid || points.size() < 2)
+        {
+            LOG_WARN(World, "Skipping way with missing nodes or excessive length in {}", path);
+            continue;
+        }
+
+        Ref<Texture> texture = GlobLoadTexture(way.texture.c_str());
+        if (!texture)
+        {
+            LOG_WARN(World, "Skipping road way with missing texture: {}", way.texture);
+            continue;
+        }
+
+        auto mesh = std::make_unique<Shape>();
+        mesh->Reserve(static_cast<int>(points.size() * 2));
+        mesh->ReserveFaces(static_cast<int>((points.size() - 1) * 2));
+        mesh->RegisterTexture(texture, 1.0f);
+
+        Poly poly;
+        poly.Init();
+        poly.SetTexture(texture);
+        poly.SetSpecial(NoClamp | NoZWrite);
+        float distance = 0.f;
+        for (size_t i = 0; i < points.size(); ++i)
+        {
+            const Vector3 before = WayPerpendicular(points[i == 0 ? i : i - 1], points[i == 0 ? i + 1 : i]);
+            const Vector3 after = WayPerpendicular(points[i], points[i + 1 < points.size() ? i + 1 : i]);
+            Vector3 perp = before + after;
+            const float norm = std::sqrt(perp.SquareSizeXZ());
+            if (norm < 1e-4f)
+                perp = after;
+            else
+                perp *= 1.0f / norm;
+            const float dot = std::fabs(perp.X() * after.X() + perp.Z() * after.Z());
+            const float halfWidth = way.width * 0.5f / floatMax(dot, 0.4f);
+            Vector3 center = points[i];
+            center[1] = land->SurfaceY(center.X(), center.Z()) + 0.08f;
+            if (i)
+                distance += std::sqrt((points[i].X() - points[i-1].X()) * (points[i].X() - points[i-1].X())
+                    + (points[i].Z() - points[i-1].Z()) * (points[i].Z() - points[i-1].Z()));
+            const Vector3 left = center + perp * halfWidth;
+            const Vector3 right = center - perp * halfWidth;
+            const float v = texture->VToPhysical(distance / way.width);
+            mesh->AddVertexFast(left, VUp, ClipAll, texture->UToPhysical(0), v);
+            mesh->AddVertexFast(right, VUp, ClipAll, texture->UToPhysical(1), v);
+            if (i)
+            {
+                const int prev = static_cast<int>((i - 1) * 2);
+                const int next = static_cast<int>(i * 2);
+                poly.SetN(3);
+                poly.Set(0, prev); poly.Set(1, next); poly.Set(2, prev + 1);
+                mesh->AddFace(poly);
+                poly.Set(0, prev + 1); poly.Set(1, next); poly.Set(2, next + 1);
+                mesh->AddFace(poly);
+            }
+        }
+        mesh->CalculateMinMax();
+        mesh->FindSections(true);
+        _wayMeshes.push_back(std::move(mesh));
+
+        for (size_t i = 1; i < points.size(); ++i)
+        {
+            Vector3 from = points[i-1], to = points[i];
+            from[1] = land->SurfaceY(from.X(), from.Z()) + 0.08f;
+            to[1] = land->SurfaceY(to.X(), to.Z()) + 0.08f;
+            RoadWaySegment segment{from, to, way.width, texture};
+            _waySegments.push_back(segment);
+            SelectRoadList((from.X() + to.X()) * 0.5f, (from.Z() + to.Z()) * 0.5f)
+                .Add(new RoadLink(from, to, way.width, texture));
+        }
+    }
+    LOG_DEBUG(World, "Loaded {} generated road way segments from {}", _waySegments.size(), path);
+}
+
+bool RoadNet::WaySurface(float x, float z, float tolerance, Texture** texture) const
+{
+    if (_waySegments.empty())
+        return false;
+    const int xx = toIntFloor(x * InvLandGrid);
+    const int zz = toIntFloor(z * InvLandGrid);
+    for (int zi = zz - 1; zi <= zz + 1; ++zi)
+        for (int xi = xx - 1; xi <= xx + 1; ++xi)
+        {
+            if (!InRange(xi, zi))
+                continue;
+            const RoadList& roads = _roads(xi, zi);
+            for (int i = 0; i < roads.Size(); ++i)
+            {
+                const RoadLink* link = roads[i];
+                if (!link->IsWay())
+                    continue;
+                if (link->IsInside(Vector3(x, 0, z), tolerance))
+                {
+                    if (texture)
+                        *texture = link->WayTexture();
+                    return true;
+                }
+            }
+        }
+    return false;
 }
 
 Vector3 RoadLink::GetCenter() const
@@ -850,6 +1140,7 @@ bool RoadNet::IsLocked(Vector3Par pos, float size) const
 void RoadNet::Build(Landscape* land)
 {
     Scan(land);
+    LoadWays(land);
     Connect();
     Optimize();
     Compact();
