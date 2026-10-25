@@ -30,7 +30,7 @@
 #include <time.h>
 #include <string>
 #include <string_view>
-#include <unordered_map>
+#include <map>
 #include <cstdio>
 #include <stdint.h>
 #include <string.h>
@@ -54,15 +54,6 @@
 
 // #define LAND_TEXTURES_MAX 256
 #define LAND_TEXTURES_MAX 512
-
-namespace
-{
-struct WrpModelHash
-{
-    using is_transparent = void;
-    size_t operator()(std::string_view name) const noexcept { return std::hash<std::string_view>{}(name); }
-};
-} // namespace
 
 namespace Poseidon
 {
@@ -183,9 +174,9 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
 
     // Cache RVW3/RVW4 model shapes for the duration of the import. Repeated
     // tree/rock names can occur millions of times, yet each distinct model
-    // only needs one Shapes.New lookup. string_view avoids a temporary string
-    // allocation for every placement.
-    std::unordered_map<std::string, Ref<LODShapeWithShadow>, WrpModelHash, std::equal_to<>> shapeCache;
+    // only needs one Shapes.New lookup. A transparent comparator permits
+    // string_view lookups without allocating temporary strings in C++17.
+    std::map<std::string, Ref<LODShapeWithShadow>, std::less<>> shapeCache;
     auto resolveShape = [&](const char* name) -> LODShapeWithShadow*
     {
         const auto existing = shapeCache.find(std::string_view(name));
