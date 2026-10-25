@@ -161,6 +161,8 @@ class RoadNet: public RefCount
 	bool SearchPath( Vector3Par from, Vector3Par to, RoadPathArray &path, float prec = 0) const;
 	// Reduce fine road links to steering goals without losing road bends.
 	static void SampleWayRoute(const RoadPathArray &route, std::vector<Vector3> &goals, float spacing = 18.f);
+	// Preserve donor P3D texture sampling and alpha flags on generated road faces.
+	static int WayFaceFlags(int donorFlags, bool donorProvided, bool blendTexture);
 	const RoadLink *IsOnRoad( Vector3Par pos, float size ) const;
 	Vector3 GetNearestRoadPoint( Vector3Par pos ) const;
 	bool GetNearestWayPoint(Vector3Par pos, float maxDistance, Vector3 &nearest) const;
