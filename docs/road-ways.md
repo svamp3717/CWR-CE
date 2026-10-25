@@ -93,9 +93,15 @@ choose widths and map road texture paths, and write the node/way records.
 * Generated-way A* search uses an indexed visited-node table. This avoids
   quadratic path lookups with dense, 2-metre road segments. The start of a
   car route accepts the same allowed road-approach tolerance as the end.
-  For connected roads, wheeled and tracked vehicle strategic planning can
-  use the road graph directly before falling back to the legacy terrain
-  search, which may reject narrow roads on otherwise impassable cells.
+  For connected roads, wheeled and tracked vehicles now preserve an actual
+  graph-derived polyline as strategic goals rather than reducing the route
+  to start and finish and driving through fields. About every 18 metres
+  (and at sharp turns), the AI gets a steering target, then runs the
+  existing operative road A* between goals even at strategic think levels.
+  Editor waypoints up to 35 metres from a road can still use the road and
+  leave it for the final approach; vehicles can join a road from within
+  12 metres. If no connected way can be found, legacy terrain A* remains
+  the fallback.
   Generated road links are not locked by parked vehicles: locking several
   contiguous ~2 m links would disconnect the only road route. Terrain-cell
   occupancy and vehicle collision avoidance still apply, and legacy P3D
@@ -104,6 +110,6 @@ choose widths and map road texture paths, and write the node/way records.
   UV availability, and number of overlay bands once per donor, to help
   diagnose asset-specific differences.
 * Changing way definitions or donor textures requires reloading the world.
-* Generated ribbons currently use the compatibility terrain mesh renderer;
+* Generated ribbons use the model/material Shape renderer;
   very large road datasets will benefit from spatial batching and a dedicated
   instanced rendering path.
