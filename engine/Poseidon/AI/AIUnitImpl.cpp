@@ -1514,7 +1514,7 @@ void AIUnit::OnStrategicPathNotFound(bool update)
     // so unreachable destinations can be distinguished from AI ordering.
     if (!update && GRoadNet && GRoadNet->HasWays())
         LOG_WARN(AI, "AI route rejected for {} from ({:.1f}, {:.1f}) to ({:.1f}, {:.1f}) planningMode={}",
-                 GetDebugName(), Position().X(), Position().Z(),
+                 (const char*)GetDebugName(), Position().X(), Position().Z(),
                  _plannedPosition.X(), _plannedPosition.Z(), static_cast<int>(_planningMode));
     _waitWithPlan = Glob.time + 10.0F;
 
