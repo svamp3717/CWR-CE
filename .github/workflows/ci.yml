@@ -1,11 +1,9 @@
 name: CI
 
-# Feature branches and PR updates must not start the full build matrix.
-# Run the Windows game-only workflow manually when testing a feature branch.
+# Build only when explicitly requested from the Actions tab.
+# No automatic builds on main, feature branches, or pull requests.
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
