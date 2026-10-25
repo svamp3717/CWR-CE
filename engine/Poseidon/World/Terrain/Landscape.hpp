@@ -662,7 +662,8 @@ class Landscape: public SerializeClass
 	Object *ObjectCreate
 	(
 		int id, LODShapeWithShadow *shape, const Matrix4 &transform,
-		int *x=nullptr, int *z=nullptr, bool avoidRecalculation = false
+		int *x=nullptr, int *z=nullptr, bool avoidRecalculation = false,
+		EntityType *cachedType = nullptr, bool typeResolved = false
 	);
 	void ObjectDestroy( int id );
 	void ObjectMove( int id, const Matrix4 &transform );
@@ -1006,6 +1007,9 @@ extern Landscape *GLandscape; // global single storage (see Landscape.cpp)
 
 void ClearShapes(); // flush all cached shapes, types ...
 
+// Resolve costly vehicle-type bank lookups once for each unique WRP model.
+EntityType *FindWorldObjectEntityType(LODShapeWithShadow *shape);
 Object *NewObject( LODShapeWithShadow *shape, int id );
+Object *NewObject( LODShapeWithShadow *shape, int id, EntityType *cachedType, bool typeResolved );
 } // namespace Poseidon
 
