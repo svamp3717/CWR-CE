@@ -423,6 +423,79 @@ RoadDonorAppearance FindDonorTopFace(Shape* shape)
     return result;
 }
 
+struct RoadDonorBand
+{
+    RoadDonorAppearance appearance;
+    float start = 0, end = 1; // [0..1] across the donor's full roadway
+};
+
+// The original donor often consists of asphalt + separate shoulder / verge
+// faces, each with its own texture. Preserve those bands. They are projected
+// from P3D local X to the requested way width, without placing a P3D object.
+std::vector<RoadDonorBand> FindDonorBands(Shape* shape, Texture* baseTexture)
+{
+    std::vector<RoadDonorBand> bands;
+    if (!shape)
+        return bands;
+    float minX = 1e10f, maxX = -1e10f;
+    for (Offset face = shape->BeginFaces(); face < shape->EndFaces(); shape->NextFace(face))
+    {
+        const Poly& poly = shape->Face(face);
+        if (!poly.GetTexture() || poly.GetAreaTop(*shape) <= 0.001f)
+            continue;
+        for (int k = 0; k < poly.N(); ++k)
+        {
+            const float x = shape->Pos(poly.GetVertex(k)).X();
+            minX = floatMin(minX, x);
+            maxX = floatMax(maxX, x);
+        }
+    }
+    const float fullWidth = maxX - minX;
+    if (fullWidth <= 0.01f)
+        return bands;
+
+    for (Offset face = shape->BeginFaces(); face < shape->EndFaces(); shape->NextFace(face))
+    {
+        const Poly& poly = shape->Face(face);
+        if (!poly.GetTexture() || poly.GetAreaTop(*shape) <= 0.01f)
+            continue;
+        RoadDonorAppearance appearance;
+        appearance.texture = poly.GetTexture();
+        appearance.special = poly.Special() | shape->Special();
+        ReadDonorUV(appearance, *shape, poly);
+        if (!appearance.hasUV)
+            continue;
+        float start = std::clamp((appearance.xMin - minX) / fullWidth, 0.f, 1.f);
+        float end = std::clamp((appearance.xMax - minX) / fullWidth, 0.f, 1.f);
+        if (end - start < 0.02f)
+            continue;
+        // The main asphalt already covers the base ribbon. Don't add full
+        // width opaque faces above it; do retain narrow shoulders and
+        // translucent full-width painted markings.
+        const bool alpha = appearance.texture->GetAlphaClass() == AlphaStats::Blend ||
+            (appearance.special & IsAlpha) != 0;
+        if (!alpha && end - start > 0.85f)
+            continue;
+        if (!alpha && appearance.texture == baseTexture && end - start > 0.70f)
+            continue;
+        bool duplicate = false;
+        for (const RoadDonorBand& b : bands)
+            if (b.appearance.texture == appearance.texture &&
+                std::fabs(b.start - start) < 0.01f &&
+                std::fabs(b.end - end) < 0.01f)
+            {
+                duplicate = true;
+                break;
+            }
+        if (!duplicate && bands.size() < 12)
+            bands.push_back({appearance, start, end});
+    }
+    // Wider layers first, narrow markings last.
+    std::sort(bands.begin(), bands.end(), [](const RoadDonorBand& a, const RoadDonorBand& b)
+    { return a.end - a.start > b.end - b.start; });
+    return bands;
+}
+
 bool IsDonorName(const std::string& name)
 {
     if (name.compare(0, 6, "donor=") == 0)
@@ -549,6 +622,7 @@ void RoadNet::LoadWays(Landscape* land)
         Ref<Texture> texture;
         Ref<Texture> surfaceTexture;
         RoadDonorAppearance visual;
+        std::vector<RoadDonorBand> bands;
         int donorSpecial = 0;
         if (IsDonorName(way.texture))
         {
@@ -564,6 +638,7 @@ void RoadNet::LoadWays(Landscape* land)
                     visual = FindDonorTopFace(donor->LevelOpaque(0));
                     texture = visual.texture;
                     donorSpecial = visual.special;
+                    bands = FindDonorBands(donor->LevelOpaque(0), texture);
                 }
                 surfaceTexture = FindDonorTopFace(donor->RoadwayLevel()).texture;
             }
