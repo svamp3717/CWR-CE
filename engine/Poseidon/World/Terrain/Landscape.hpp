@@ -6,7 +6,7 @@
 #include <Poseidon/Foundation/Containers/BankArray.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 
-namespace Poseidon { class TaskPool; }
+namespace Poseidon { class TaskPool; struct WrpObjectProfile; }
 namespace Poseidon
 {
 using Poseidon::TaskPool;
@@ -663,7 +663,8 @@ class Landscape: public SerializeClass
 	(
 		int id, LODShapeWithShadow *shape, const Matrix4 &transform,
 		int *x=nullptr, int *z=nullptr, bool avoidRecalculation = false,
-		EntityType *cachedType = nullptr, bool typeResolved = false
+		EntityType *cachedType = nullptr, bool typeResolved = false,
+		WrpObjectProfile *profile = nullptr
 	);
 	void ObjectDestroy( int id );
 	void ObjectMove( int id, const Matrix4 &transform );
