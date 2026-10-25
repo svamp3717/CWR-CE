@@ -287,6 +287,29 @@ bool ReadWayDefinitions(const std::string& data,
     return true;
 }
 
+// Use the donor's original textures instead of guessing a road texture
+// from its file name. Visual LOD supplies pixels/UV appearance; roadway
+// LOD supplies the contact material (roughness, dust and sound environment).
+Texture* FirstFaceTexture(Shape* shape)
+{
+    if (!shape)
+        return nullptr;
+    for (Offset face = shape->BeginFaces(); face < shape->EndFaces(); shape->NextFace(face))
+        if (Texture* texture = shape->Face(face).GetTexture())
+            return texture;
+    return nullptr;
+}
+
+bool IsDonorName(const std::string& name)
+{
+    if (name.compare(0, 6, "donor=") == 0)
+        return true;
+    if (name.size() < 4)
+        return false;
+    const std::string suffix = name.substr(name.size() - 4);
+    return suffix == ".p3d" || suffix == ".P3D";
+}
+
 Vector3 WayPerpendicular(Vector3Par from, Vector3Par to)
 {
     const float dx = to.X() - from.X();
@@ -376,7 +399,10 @@ void RoadNet::LoadWays(Landscape* land)
             }
             if (length < 0.01f)
                 continue;
-            const int steps = std::max(1, static_cast<int>(std::ceil(length / floatMin(8.f, land->GetLandGrid() * 0.25f))));
+            // Four-metre terrain cells and sharp hills need finer than the old
+            // 8-metre ribbon sections or terrain triangles poke through.
+            const float stepLength = floatMin(2.0f, land->GetTerrainGrid() * 0.25f);
+            const int steps = std::max(1, static_cast<int>(std::ceil(length / stepLength)));
             if (steps > 8192 || points.size() + static_cast<size_t>(steps) > 16000)
             {
                 valid = false;
@@ -394,10 +420,31 @@ void RoadNet::LoadWays(Landscape* land)
             continue;
         }
 
-        Ref<Texture> texture = GlobLoadTexture(way.texture.c_str());
-        if (!texture)
+        Ref<Texture> texture;
+        Ref<Texture> surfaceTexture;
+        if (IsDonorName(way.texture))
         {
-            LOG_WARN(World, "Skipping road way with missing texture: {}", way.texture);
+            const std::string donorPath = way.texture.compare(0, 6, "donor=") == 0
+                ? way.texture.substr(6) : way.texture;
+            Ref<LODShapeWithShadow> donor = Shapes.New(donorPath.c_str(), false, true);
+            if (donor)
+            {
+                texture = FirstFaceTexture(donor->LevelOpaque(0));
+                surfaceTexture = FirstFaceTexture(donor->RoadwayLevel());
+            }
+            if (!surfaceTexture)
+                surfaceTexture = texture;
+            if (!texture)
+                texture = surfaceTexture;
+        }
+        else
+        {
+            texture = GlobLoadTexture(way.texture.c_str());
+            surfaceTexture = texture;
+        }
+        if (!texture || !surfaceTexture)
+        {
+            LOG_WARN(World, "Skipping road way with missing donor/texture: {}", way.texture);
             continue;
         }
 
@@ -426,7 +473,7 @@ void RoadNet::LoadWays(Landscape* land)
             const float dot = std::fabs(perp.X() * after.X() + perp.Z() * after.Z());
             const float halfWidth = way.width * 0.5f / floatMax(dot, 0.4f);
             Vector3 center = points[i];
-            center[1] = land->SurfaceY(center.X(), center.Z()) + 0.08f;
+            center[1] = land->SurfaceY(center.X(), center.Z()) + RoadWaySurfaceOffset;
             if (i)
                 distance += std::sqrt((points[i].X() - points[i-1].X()) * (points[i].X() - points[i-1].X())
                     + (points[i].Z() - points[i-1].Z()) * (points[i].Z() - points[i-1].Z()));
@@ -434,11 +481,16 @@ void RoadNet::LoadWays(Landscape* land)
             Vector3 right = center - perp * halfWidth;
             // Conform both edges independently on sloped terrain. Sampling
             // only the centre would leave wide roads floating or buried.
-            left[1] = land->SurfaceY(left.X(), left.Z()) + 0.08f;
-            right[1] = land->SurfaceY(right.X(), right.Z()) + 0.08f;
+            float leftDX = 0, leftDZ = 0, rightDX = 0, rightDZ = 0;
+            left[1] = land->SurfaceY(left.X(), left.Z(), &leftDX, &leftDZ) + RoadWaySurfaceOffset;
+            right[1] = land->SurfaceY(right.X(), right.Z(), &rightDX, &rightDZ) + RoadWaySurfaceOffset;
+            Vector3 leftNormal(-leftDX, 1, -leftDZ);
+            Vector3 rightNormal(-rightDX, 1, -rightDZ);
+            leftNormal.Normalize();
+            rightNormal.Normalize();
             const float v = texture->VToPhysical(distance / way.width);
-            mesh->AddVertexFast(left, VUp, ClipAll, texture->UToPhysical(0), v);
-            mesh->AddVertexFast(right, VUp, ClipAll, texture->UToPhysical(1), v);
+            mesh->AddVertexFast(left, leftNormal, ClipAll, texture->UToPhysical(0), v);
+            mesh->AddVertexFast(right, rightNormal, ClipAll, texture->UToPhysical(1), v);
             if (i)
             {
                 const int prev = static_cast<int>((i - 1) * 2);
@@ -457,12 +509,12 @@ void RoadNet::LoadWays(Landscape* land)
         for (size_t i = 1; i < points.size(); ++i)
         {
             Vector3 from = points[i-1], to = points[i];
-            from[1] = land->SurfaceY(from.X(), from.Z()) + 0.08f;
-            to[1] = land->SurfaceY(to.X(), to.Z()) + 0.08f;
-            RoadWaySegment segment{from, to, way.width, texture};
+            from[1] = land->SurfaceY(from.X(), from.Z()) + RoadWaySurfaceOffset;
+            to[1] = land->SurfaceY(to.X(), to.Z()) + RoadWaySurfaceOffset;
+            RoadWaySegment segment{from, to, way.width, texture, surfaceTexture};
             _waySegments.push_back(segment);
             SelectRoadList((from.X() + to.X()) * 0.5f, (from.Z() + to.Z()) * 0.5f)
-                .Add(new RoadLink(from, to, way.width, texture));
+                .Add(new RoadLink(from, to, way.width, surfaceTexture));
         }
     }
     LOG_DEBUG(World, "Loaded {} generated road way segments from {}", _waySegments.size(), path);
