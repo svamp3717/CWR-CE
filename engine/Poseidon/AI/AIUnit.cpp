@@ -163,6 +163,15 @@ void AILocker::LockPosition(Vector3Val pos, float radius, bool soldier, float si
             for (i = 0; i < roadList.Size(); i++)
             {
                 RoadLink* item = roadList[i];
+                // Legacy P3D road pieces were long enough for one locked
+                // section to represent a blocked road. Procedural links are
+                // only ~2 metres: a parked car would lock several consecutive
+                // links and disconnect the whole road graph, making cars
+                // report their movement orders as unreachable ("Negative").
+                // Terrain-cell locks and vehicle collision avoidance still
+                // handle occupied positions; keep the path graph traversable.
+                if (item->IsWay())
+                    continue;
                 if (item->IsInside(pos, size))
                 {
                     item->Lock();
