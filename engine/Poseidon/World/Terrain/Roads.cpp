@@ -1340,6 +1340,7 @@ class RoadNodeContainer : public AutoArray<SRef<RoadNode>>
 
     void AddNode(RoadNode* node)
     {
+        PoseidonAssert(node && node->road);
         _visited[node->road] = node;
         Add(node);
     }
@@ -1360,7 +1361,7 @@ inline float RoadHeur(Vector3Par from, Vector3Par to)
 #undef DIAGS
 #define DIAGS 0
 
-void RoadNet::SampleWayRoute(const RoadPathArray& route, std::vector<Vector3>& goals)
+void RoadNet::SampleWayRoute(const RoadPathArray& route, std::vector<Vector3>& goals, float spacing)
 {
     goals.clear();
     if (route.Size() == 0)
@@ -1372,9 +1373,9 @@ void RoadNet::SampleWayRoute(const RoadPathArray& route, std::vector<Vector3>& g
     float totalLength = 0.f;
     for (int i = 1; i < route.Size(); ++i)
         totalLength += (route[i] - route[i - 1]).SizeXZ();
-    const float step = floatMax(18.f, totalLength / 750.f);
+    const float step = floatMax(floatMax(spacing, 2.f), totalLength / 1200.f);
 
-    goals.reserve(std::min(route.Size(), 850));
+    goals.reserve(std::min(route.Size(), 1250));
     goals.push_back(route[0]);
     float sinceGoal = 0.f;
     for (int i = 1; i + 1 < route.Size(); ++i)
