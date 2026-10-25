@@ -40,6 +40,7 @@ class RoadLink
 	__forceinline void SetConnection( int i, RoadLink *con ){_con[i]=con;}
 
 	void AddConnection( Vector3Par pos, RoadLink *con );
+	void UpdateWayHeights(Landscape *land);
 	Vector3 GetCenter() const;
 	float NearestConnectionDist2(Vector3Val pos) const;
 
