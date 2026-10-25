@@ -30,7 +30,8 @@
 #include <time.h>
 #include <string>
 #include <string_view>
-#include <map>
+#include <deque>
+#include <unordered_map>
 #include <cstdio>
 #include <stdint.h>
 #include <string.h>
@@ -178,11 +179,11 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
     bool isID[maxID];
     memset(isID, 0, sizeof(isID));
 
-    // Cache RVW3/RVW4 model shapes for the duration of the import. Repeated
-    // tree/rock names can occur millions of times, yet each distinct model
-    // only needs one Shapes.New lookup. A transparent comparator permits
-    // string_view lookups without allocating temporary strings in C++17.
-    std::map<std::string, WrpCachedModel, std::less<>> shapeCache;
+    // Cache RVW3/RVW4 model shapes for the duration of the import. Keep
+    // stable owning strings in a deque so an unordered_map<string_view> can
+    // perform allocation-free O(1) average lookups in C++17.
+    std::deque<std::string> shapeNames;
+    std::unordered_map<std::string_view, WrpCachedModel> shapeCache;
     auto resolveShape = [&](const char* name) -> const WrpCachedModel&
     {
         const auto existing = shapeCache.find(std::string_view(name));
@@ -191,7 +192,8 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
         WrpCachedModel model;
         model.shape = Shapes.New(name, false, true);
         model.entityType = FindWorldObjectEntityType(model.shape);
-        return shapeCache.emplace(name, std::move(model)).first->second;
+        shapeNames.emplace_back(name);
+        return shapeCache.emplace(std::string_view(shapeNames.back()), std::move(model)).first->second;
     };
 
     // load all objects
