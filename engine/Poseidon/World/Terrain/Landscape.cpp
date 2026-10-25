@@ -15,6 +15,7 @@
 
 #include <Poseidon/World/Terrain/LandscapeShared.hpp>
 #include <Poseidon/World/Terrain/TerrainProfile.hpp>
+#include <Poseidon/World/Terrain/WrpObjectProfile.hpp>
 
 #include <Poseidon/Core/TaskPool.hpp>
 
@@ -2406,10 +2407,41 @@ Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transfo
 }
 
 Object* Landscape::ObjectCreate(int id, LODShapeWithShadow* shape, const Matrix4& transform, int* x, int* z,
-                                bool avoidRecalculation, EntityType* cachedType, bool typeResolved)
+                                bool avoidRecalculation, EntityType* cachedType, bool typeResolved,
+                                WrpObjectProfile* profile)
 {
+    // Only sampled placements call the clock. Most calls keep profile == nullptr.
+    using Stage = WrpObjectProfile::Stage;
+    using Clock = WrpObjectProfile::Clock;
+    auto last = profile ? Clock::now() : WrpObjectProfile::TimePoint{};
+    auto mark = [&](Stage stage)
+    {
+        if (profile)
+        {
+            const auto now = Clock::now();
+            profile->Record(stage, last, now);
+            last = now;
+        }
+    };
+
     // The WRP loader can resolve vehicle-type bank lookups once per shape.
+    const auto factoryStarted = last;
     Object* obj = NewObject(shape, id, cachedType, typeResolved);
+    mark(Stage::Factory);
+    if (profile)
+    {
+        const RStringB& property = shape->GetPropertyClass();
+        WrpObjectProfile::Kind kind = WrpObjectProfile::Other;
+        if (property == "forest")
+            kind = WrpObjectProfile::Forest;
+        else if (property == "road")
+            kind = WrpObjectProfile::Road;
+        else if (property == "streetlamp")
+            kind = WrpObjectProfile::StreetLamp;
+        else if (property == "house" || property == "vehicle" || property == "church")
+            kind = WrpObjectProfile::Building;
+        profile->RecordFactoryKind(kind, factoryStarted, last);
+    }
 
     if (obj->GetType() != Primary && obj->GetType() != Network)
     {
@@ -2420,6 +2452,7 @@ Object* Landscape::ObjectCreate(int id, LODShapeWithShadow* shape, const Matrix4
     _objectIds.Access(id);
     _objectIds[id] = obj;
     PoseidonAssert(obj->ID() == id);
+    mark(Stage::IDCache);
     // check matrix type
 
     Matrix4 nTransform = transform;
@@ -2447,8 +2480,10 @@ Object* Landscape::ObjectCreate(int id, LODShapeWithShadow* shape, const Matrix4
         nTransform.SetScale(scale);
     }
 #endif
+    mark(Stage::MatrixRepair);
 
     obj->SetTransform(nTransform);
+    mark(Stage::SetTransform);
 
 #if 1
 
@@ -2457,17 +2492,22 @@ Object* Landscape::ObjectCreate(int id, LODShapeWithShadow* shape, const Matrix4
         // auto-correct values
         Vector3 oPos = obj->Position();
         Vector3 pos = obj->PositionModelToWorld(-shape->BoundingCenter());
+        mark(Stage::GroundPosition);
 
-        float above = pos[1] - SurfaceY(pos[0], pos[2]);
+        const float surfaceHeight = SurfaceY(pos[0], pos[2]);
+        mark(Stage::SurfaceHeight);
+        const float above = pos[1] - surfaceHeight;
         if (above > 0)
         {
             oPos[1] -= above;
             obj->SetPosition(oPos);
         }
+        mark(Stage::GroundPosition);
     }
 #endif
 
     AddObject(obj, x, z, avoidRecalculation);
+    mark(Stage::CellInsertion);
     return obj;
 }
 
