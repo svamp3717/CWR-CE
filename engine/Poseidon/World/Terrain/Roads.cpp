@@ -16,6 +16,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Poseidon
@@ -488,6 +489,8 @@ void RoadNet::LoadWays(Landscape* land)
 
     // Generate textured terrain-following ribbons and short road links. The
     // latter join the original P3D links using RoadNet::Connect's endpoint logic.
+    // Emit only one diagnostic per source; maps can contain thousands of ways.
+    std::unordered_set<std::string> reportedMaterials;
     for (const ParsedWay& way : ways)
     {
         std::vector<Vector3> points;
@@ -579,6 +582,10 @@ void RoadNet::LoadWays(Landscape* land)
             LOG_WARN(World, "Skipping road way with missing donor/texture: {}", way.texture);
             continue;
         }
+        if (reportedMaterials.insert(way.texture).second)
+            LOG_INFO(World,
+                     "Generated road material '{}': visual='{}', contact='{}', donorUV={}",
+                     way.texture, texture->Name(), surfaceTexture->Name(), visual.hasUV);
 
         // Keep original unsampled edges for the 2D map.
         for (size_t i = 1; i < way.nodes.size(); ++i)
