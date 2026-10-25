@@ -633,6 +633,35 @@ bool AIPathPlanner::StartSearching(AI::ThinkImportance prec, VehicleWithAI* veh,
     }
     else
     {
+        // For wheeled/tracked vehicles with connected procedural roads,
+        // use the real road graph for the strategic route as well. The
+        // coarse terrain-cell planner can reject a destination when a
+        // narrow road runs across otherwise impassable hillside cells.
+        // Only short-circuit when the existing road graph actually finds
+        // a complete route; otherwise retain the original terrain A*.
+        const bool groundVehicle = veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeCar)) ||
+            veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeAPC)) ||
+            veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeTank));
+        if (groundVehicle && !veh->IsCautious() && GRoadNet && GRoadNet->HasWays() &&
+            GRoadNet->IsOnRoad(ptStart, 8.f) && GRoadNet->IsOnRoad(ptEnd, 8.f))
+        {
+            RoadPathArray route;
+            if (GRoadNet->SearchPath(ptStart, ptEnd, route, 8.f) && route.Size() >= 2)
+            {
+                _plan.Resize(2);
+                _plan[0]._x = xs;
+                _plan[0]._z = zs;
+                _plan[0]._mode = FieldPassing::MoveOnRoad;
+                _plan[1]._x = xe;
+                _plan[1]._z = ze;
+                _plan[1]._mode = FieldPassing::MoveOnRoad;
+                CalculatePlanPositions();
+                _searching = false;
+                LOG_DEBUG(AI, "Using {} procedural road points for strategic vehicle path", route.Size());
+                return true;
+            }
+        }
+
         // target may be out range
         if (!InRange(xs, zs))
         {
