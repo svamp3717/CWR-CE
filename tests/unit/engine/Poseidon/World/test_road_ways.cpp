@@ -130,13 +130,13 @@ TEST_CASE("Procedural ways preserve original P3D alpha ordered clamp material", 
     // flags, changing colors even with the correct donor P3D.
     constexpr int original = 0x00024102;
     const int flags = RoadNet::WayFaceFlags(original, true, true);
-    REQUIRE(flags == original);
+    REQUIRE(flags == (original | NoZWrite));
     REQUIRE((flags & OnSurface) != 0);
     REQUIRE((flags & IsAlpha) != 0);
     REQUIRE((flags & IsAlphaOrdered) != 0);
     REQUIRE((flags & ClampU) != 0);
     REQUIRE((flags & NoClamp) == 0);
-    REQUIRE((flags & NoZWrite) == 0);
+    REQUIRE((flags & NoZWrite) != 0);
 
     // Texture-only .ways entries still use their legacy fallback.
     REQUIRE(RoadNet::WayFaceFlags(0, false, true) == (NoClamp | NoZWrite | IsAlpha));
@@ -150,4 +150,29 @@ TEST_CASE("Donor road faces cannot inherit hidden or water rendering", "[World][
     REQUIRE((flags & OnSurface) != 0);
     REQUIRE((flags & IsHidden) == 0);
     REQUIRE((flags & IsWater) == 0);
+}
+
+TEST_CASE("Procedural asphalt and donor overlay faces point upward", "[World][RoadWays][Rendering]")
+{
+    // Shape::GetNormal uses the legacy p2 cross p1 ordering. A reversed
+    // surface can be culled from above or lit as its dark underside.
+    Shape mesh;
+    mesh.Reserve(4);
+    mesh.ReserveFaces(2);
+    const Vector3 normal(0, 1, 0);
+    mesh.AddVertexFast(Vector3(0, 0, 0), normal, ClipAll, 0, 0);
+    mesh.AddVertexFast(Vector3(2, 0, 0), normal, ClipAll, 1, 0);
+    mesh.AddVertexFast(Vector3(0, 0, 2), normal, ClipAll, 0, 1);
+    mesh.AddVertexFast(Vector3(2, 0, 2), normal, ClipAll, 1, 1);
+
+    Poly face;
+    face.Init();
+    RoadNet::AddWayQuad(mesh, face, 0, 2);
+    REQUIRE(mesh.NFaces() == 2);
+    for (int i = 0; i < mesh.NFaces(); ++i)
+    {
+        const Poly& triangle = mesh.FaceIndexed(i);
+        REQUIRE(triangle.GetNormal(mesh).Y() > 0.f);
+        REQUIRE(triangle.GetAreaTop(mesh) == Catch::Approx(2.f));
+    }
 }
