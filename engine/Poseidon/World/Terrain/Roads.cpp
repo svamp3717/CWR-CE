@@ -1214,7 +1214,11 @@ bool RoadNet::SearchPath(Vector3Par from, Vector3Par to, RoadPathArray& path, fl
             goto PathNotFound;
         }
 
-        if (best->road->IsInside(from, 0))
+        // Unlike P3D roadway polygons, generated ways represent a
+        // terrain strip. A car may begin just beside the strip; the
+        // caller's precision must apply at BOTH ends of the search.
+        const float startTolerance = best->road->IsWay() ? floatMax(prec, 0.f) : 0.f;
+        if (best->road->IsInside(from, startTolerance))
         {
             // best is the first node of result path
             goto PathFound;
@@ -1309,6 +1313,9 @@ PathNotFound:
 #if DIAGS
     LOG_DEBUG(World, "  path not found at {} iters", iter);
 #endif
+    if (!_waySegments.empty())
+        LOG_DEBUG(AI, "Generated road route unavailable from ({:.1f}, {:.1f}) to ({:.1f}, {:.1f}), precision {:.1f}, visited {} links",
+                  from.X(), from.Z(), to.X(), to.Z(), prec, container.Size());
     return false;
 
 PathFound:
