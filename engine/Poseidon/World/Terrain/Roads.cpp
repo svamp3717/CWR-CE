@@ -138,6 +138,26 @@ inline RoadList& RoadNet::SelectRoadList(float x, float z)
 RoadNet::RoadNet() = default;
 RoadNet::~RoadNet() = default;
 
+int RoadNet::WayFaceFlags(int donorFlags, bool donorProvided, bool blendTexture)
+{
+    if (donorProvided)
+    {
+        // P3D face flags are a *material*, not just visibility hints.
+        // In particular, 0x00024102 is OnSurface|IsAlpha|ClampU|
+        // IsAlphaOrdered. The previous procedural mesh replaced that with
+        // NoClamp|NoZWrite, causing transparent road texels to be rendered
+        // with different sampling, lighting and compositing.
+        //
+        // Keep original UV clamp, alpha and surface draw-order flags.
+        // Only strip flags that could hide the road, render it as water,
+        // or let it render straight through terrain geometry.
+        return donorFlags & ~(IsHidden | IsHiddenProxy | IsWater | IsShadow | NoZBuf);
+    }
+    // Existing .ways entries with a direct .paa/.pac texture have no
+    // donor geometry to obtain flags from. Preserve their previous fallback.
+    return NoClamp | NoZWrite | (blendTexture ? IsAlpha : 0);
+}
+
 void RoadNet::Scan(Landscape* land)
 {
     // Array2D::Dim preserves old elements when dimensions match! A rebuild
@@ -522,6 +542,11 @@ std::vector<RoadDonorBand> FindDonorBands(Shape* shape, Texture* baseTexture)
         const Poly& poly = shape->Face(face);
         if (!poly.GetTexture() || poly.GetAreaTop(*shape) <= 0.01f)
             continue;
+        // A donor may have several coplanar faces using the SAME texture.
+        // Layering that texture again makes alpha-composited asphalt darker
+        // (or washed out), even though the original P3D draws it once.
+        if (poly.GetTexture() == baseTexture)
+            continue;
         RoadDonorAppearance appearance;
         appearance.texture = poly.GetTexture();
         appearance.special = poly.Special() | shape->Special();
@@ -603,11 +628,9 @@ void AppendDonorBandMeshes(std::vector<std::unique_ptr<Shape>>& meshes, Landscap
         Poly poly;
         poly.Init();
         poly.SetTexture(texture);
-        int flags = NoClamp | NoZWrite;
-        if (texture->GetAlphaClass() == AlphaStats::Blend ||
-            (band.appearance.special & (IsAlpha | IsTransparent)) != 0)
-            flags |= IsAlpha;
-        poly.SetSpecial(flags);
+        poly.SetSpecial(RoadNet::WayFaceFlags(
+            band.appearance.special, true,
+            texture->GetAlphaClass() == AlphaStats::Blend));
         for (size_t i = first; i < last; ++i)
         {
             const Vector3 before = i == 0 ? WayPerpendicular(points[0], points[1])
@@ -805,8 +828,10 @@ void RoadNet::LoadWays(Landscape* land)
         }
         if (reportedMaterials.insert(way.texture).second)
             LOG_INFO(World,
-                     "Generated road material '{}': visual='{}', contact='{}', donorUV={}, overlayBands={}",
-                     way.texture, texture->Name(), surfaceTexture->Name(), visual.hasUV, bands.size());
+                     "Generated road material '{}': visual='{}', contact='{}', donorUV={}, overlayBands={}, donorFlags=0x{:08x}, wayFlags=0x{:08x}",
+                     way.texture, texture->Name(), surfaceTexture->Name(), visual.hasUV, bands.size(),
+                     donorSpecial, WayFaceFlags(donorSpecial, IsDonorName(way.texture),
+                                                texture->GetAlphaClass() == AlphaStats::Blend));
 
         // Keep original unsampled edges for the 2D map.
         for (size_t i = 1; i < way.nodes.size(); ++i)
@@ -847,11 +872,10 @@ void RoadNet::LoadWays(Landscape* land)
             // asphalt and shoulders are intentionally blended over terrain.
             // The original ribbon was forced opaque, exposing dark texels
             // instead of their alpha-composited colour.
-            int surfaceFlags = NoClamp | NoZWrite;
-            if ((donorSpecial & (IsAlpha | IsTransparent)) != 0 ||
-                texture->GetAlphaClass() == AlphaStats::Blend)
-                surfaceFlags |= IsAlpha;
-            poly.SetSpecial(surfaceFlags);
+            // Preserve original donor sampling, transparency and ordering.
+            // The generic fallback is only for texture-only .ways entries.
+            poly.SetSpecial(WayFaceFlags(donorSpecial, IsDonorName(way.texture),
+                                         texture->GetAlphaClass() == AlphaStats::Blend));
             for (size_t i = first; i < last; ++i)
             {
                 const Vector3 before = i == 0 ? WayPerpendicular(points[0], points[1])
