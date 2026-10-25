@@ -2,6 +2,7 @@
 
 #include <Poseidon/Core/Types.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/Material.hpp>
 #include <Poseidon/Foundation/Containers/SmallArray.hpp>
 #include <Poseidon/Foundation/Containers/BigArray.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -130,6 +131,7 @@ class RoadNet: public RefCount
 	const Landscape *_builtForLandscape = nullptr;
 	std::string _builtForName;
 	std::vector<std::unique_ptr<Shape>> _wayMeshes;
+	std::vector<Ref<TexMaterial>> _wayMaterials; // hold donor visual materials across preview transitions
 	//BIG_ARRAY<RoadList,LandRange,LandRange> _roads; // all roads
 
 	inline RoadList &SelectRoadList( float x, float z );
