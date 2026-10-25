@@ -798,14 +798,34 @@ DEF_RSB(house);
 DEF_RSB(vehicle);
 DEF_RSB(church);
 
+EntityType* FindWorldObjectEntityType(LODShapeWithShadow* shape)
+{
+    const RStringB& className = shape->GetPropertyClass();
+    if (className == RSB(forest))
+        return VehicleTypes.FindShape(shape->Name());
+
+    if (className == RSB(streetlamp) || className == RSB(house) || className == RSB(vehicle) ||
+        className == RSB(church))
+    {
+        EntityType* type = VehicleTypes.FindShapeAndSimulation(shape->Name(), className);
+        return type ? type : VehicleTypes.FindShape(shape->Name());
+    }
+    return nullptr;
+}
+
 Object* NewObject(LODShapeWithShadow* shape, int id)
+{
+    return NewObject(shape, id, nullptr, false);
+}
+
+Object* NewObject(LODShapeWithShadow* shape, int id, EntityType* cachedType, bool typeResolved)
 {
     const RStringB& className = shape->GetPropertyClass();
     if (className.GetLength() > 0)
     {
         if (className == RSB(forest))
         {
-            BuildingType* type = dynamic_cast<BuildingType*>(VehicleTypes.FindShape(shape->Name()));
+            BuildingType* type = dynamic_cast<BuildingType*>(typeResolved ? cachedType : FindWorldObjectEntityType(shape));
             if (type)
             {
                 type->VehicleAddRef();
@@ -823,11 +843,7 @@ Object* NewObject(LODShapeWithShadow* shape, int id)
         else if (className == RSB(streetlamp))
         {
             // EntityType *vehType = VehicleTypes.New("StreetLamp");
-            EntityType* vehType = VehicleTypes.FindShapeAndSimulation(shape->Name(), className);
-            if (!vehType)
-            {
-                vehType = VehicleTypes.FindShape(shape->Name());
-            }
+            EntityType* vehType = typeResolved ? cachedType : FindWorldObjectEntityType(shape);
             if (!vehType)
             {
                 LOG_DEBUG(Graphics, "{}: {}, config class missing", shape->Name(), (const char*)className);
@@ -845,12 +861,7 @@ Object* NewObject(LODShapeWithShadow* shape, int id)
         {
             // search vehicle type bank for given shape
             // prefer type with the same simulation
-            EntityType* vType = VehicleTypes.FindShapeAndSimulation(shape->Name(), className);
-            if (!vType)
-            {
-                // if not found, resort to any type with this shape
-                vType = VehicleTypes.FindShape(shape->Name());
-            }
+            EntityType* vType = typeResolved ? cachedType : FindWorldObjectEntityType(shape);
             if (!vType)
             {
                 // it is not in config: ignore it
