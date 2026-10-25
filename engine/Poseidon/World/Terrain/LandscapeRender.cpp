@@ -2111,6 +2111,8 @@ void Landscape::FlushHeightmapToRenderer()
 
 void Landscape::Draw(Scene& scene)
 {
+    if (_roadWayGeometryDirty)
+        RefreshWayTerrain();
     FlushHeightmapToRenderer();
 
     {
