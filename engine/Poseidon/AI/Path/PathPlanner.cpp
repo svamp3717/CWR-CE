@@ -627,18 +627,27 @@ bool AIPathPlanner::StartSearching(AI::ThinkImportance prec, VehicleWithAI* veh,
     const bool groundVehicle = veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeCar)) ||
         veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeAPC)) ||
         veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeTank));
+    Vector3 roadEntry, roadExit;
     if (groundVehicle && !veh->IsCautious() && GRoadNet && GRoadNet->HasWays() &&
-        GRoadNet->IsOnRoad(ptStart, 8.f) && GRoadNet->IsOnRoad(ptEnd, 8.f))
+        GRoadNet->GetNearestWayPoint(ptStart, 12.f, roadEntry) &&
+        GRoadNet->GetNearestWayPoint(ptEnd, 35.f, roadExit))
     {
         RoadPathArray route;
-        if (GRoadNet->SearchPath(ptStart, ptEnd, route, 8.f) && route.Size() >= 2)
+        if (GRoadNet->SearchPath(roadEntry, roadExit, route, 3.f) && route.Size() >= 2)
         {
-            // Reuse the tested centerline sampler rather than dropping
-            // corners when converting a graph path to strategic goals.
+            // Retain bends even if the exact editor waypoint was placed
+            // alongside the road rather than directly on the centerline.
             std::vector<Vector3> goals;
             RoadNet::SampleWayRoute(route, goals);
             if (goals.size() < 2)
                 return false;
+
+            const bool approachRoad = (ptStart - roadEntry).SquareSizeXZ() > Square(3.f);
+            const bool leaveRoad = (ptEnd - roadExit).SquareSizeXZ() > Square(3.f);
+            if (approachRoad)
+                goals.insert(goals.begin(), ptStart);
+            if (leaveRoad)
+                goals.push_back(ptEnd);
 
             float totalLength = 0.f;
             for (int i = 1; i < route.Size(); ++i)
@@ -653,7 +662,9 @@ bool AIPathPlanner::StartSearching(AI::ThinkImportance prec, VehicleWithAI* veh,
                 FieldPassing& field = _plan[i];
                 field._x = std::clamp(toIntFloor(p.X() * InvLandGrid), 0, LandRange - 1);
                 field._z = std::clamp(toIntFloor(p.Z() * InvLandGrid), 0, LandRange - 1);
-                field._mode = FieldPassing::MoveOnRoad;
+                field._mode = (i == 0 && approachRoad ||
+                    i == static_cast<int>(goals.size()) - 1 && leaveRoad)
+                    ? FieldPassing::Move : FieldPassing::MoveOnRoad;
                 if (i)
                     runningCost += (p - goals[i - 1]).SizeXZ() *
                         veh->GetType()->GetMinCost();
