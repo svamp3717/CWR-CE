@@ -307,7 +307,63 @@ struct RoadDonorAppearance
 {
     Texture* texture = nullptr;
     int special = 0;
+    bool hasUV = false;
+    float uX = 0, uZ = 0, uC = 0;
+    float vX = 0, vZ = 0, vC = 0;
+    float xMin = 0, xMax = 0, zMin = 0;
 };
+
+// Recover the source P3D face's *actual* UV projection. Blindly mapping U
+// to [0..1] and V to distance/width sampled the wrong part of road textures
+// whose donor meshes tile, mirror or offset their UV coordinates.
+void ReadDonorUV(RoadDonorAppearance& out, const Shape& shape, const Poly& poly)
+{
+    if (!out.texture || poly.N() < 3)
+        return;
+    out.xMin = 1e10f;
+    out.xMax = -1e10f;
+    out.zMin = 1e10f;
+    for (int k = 0; k < poly.N(); ++k)
+    {
+        const Vector3 p = shape.Pos(poly.GetVertex(k));
+        out.xMin = floatMin(out.xMin, p.X());
+        out.xMax = floatMax(out.xMax, p.X());
+        out.zMin = floatMin(out.zMin, p.Z());
+    }
+    if (out.xMax - out.xMin < 0.001f)
+        return;
+
+    const int i0 = poly.GetVertex(0);
+    const Vector3 p0 = shape.Pos(i0);
+    const float u0 = out.texture->UToLogical(shape.U(i0));
+    const float v0 = out.texture->VToLogical(shape.V(i0));
+    for (int k = 2; k < poly.N(); ++k)
+    {
+        const int i1 = poly.GetVertex(k - 1), i2 = poly.GetVertex(k);
+        const Vector3 p1 = shape.Pos(i1), p2 = shape.Pos(i2);
+        const float dx1 = p1.X() - p0.X(), dz1 = p1.Z() - p0.Z();
+        const float dx2 = p2.X() - p0.X(), dz2 = p2.Z() - p0.Z();
+        const float determinant = dx1 * dz2 - dx2 * dz1;
+        if (std::fabs(determinant) < 1e-5f)
+            continue;
+
+        const float du1 = out.texture->UToLogical(shape.U(i1)) - u0;
+        const float du2 = out.texture->UToLogical(shape.U(i2)) - u0;
+        const float dv1 = out.texture->VToLogical(shape.V(i1)) - v0;
+        const float dv2 = out.texture->VToLogical(shape.V(i2)) - v0;
+        out.uX = (du1 * dz2 - du2 * dz1) / determinant;
+        out.uZ = (dx1 * du2 - dx2 * du1) / determinant;
+        out.vX = (dv1 * dz2 - dv2 * dz1) / determinant;
+        out.vZ = (dx1 * dv2 - dx2 * dv1) / determinant;
+        out.uC = u0 - out.uX * p0.X() - out.uZ * p0.Z();
+        out.vC = v0 - out.vX * p0.X() - out.vZ * p0.Z();
+        out.hasUV = std::isfinite(out.uX) && std::isfinite(out.uZ) &&
+            std::isfinite(out.vX) && std::isfinite(out.vZ) &&
+            std::isfinite(out.uC) && std::isfinite(out.vC);
+        if (out.hasUV)
+            return;
+    }
+}
 
 RoadDonorAppearance FindDonorTopFace(Shape* shape)
 {
@@ -316,6 +372,7 @@ RoadDonorAppearance FindDonorTopFace(Shape* shape)
         return result;
 
     float largestTopArea = 0.f;
+    Offset selected = shape->EndFaces();
     for (Offset face = shape->BeginFaces(); face < shape->EndFaces(); shape->NextFace(face))
     {
         const Poly& polygon = shape->Face(face);
@@ -326,6 +383,7 @@ RoadDonorAppearance FindDonorTopFace(Shape* shape)
         if (topArea > largestTopArea)
         {
             largestTopArea = topArea;
+            selected = face;
             result.texture = texture;
             result.special = polygon.Special() | shape->Special();
         }
@@ -353,11 +411,14 @@ RoadDonorAppearance FindDonorTopFace(Shape* shape)
             if (area > largestXZArea)
             {
                 largestXZArea = area;
+                selected = face;
                 result.texture = polygon.GetTexture();
                 result.special = polygon.Special() | shape->Special();
             }
         }
     }
+    if (selected != shape->EndFaces())
+        ReadDonorUV(result, *shape, shape->Face(selected));
     return result;
 }
 
@@ -484,6 +545,7 @@ void RoadNet::LoadWays(Landscape* land)
 
         Ref<Texture> texture;
         Ref<Texture> surfaceTexture;
+        RoadDonorAppearance visual;
         int donorSpecial = 0;
         if (IsDonorName(way.texture))
         {
@@ -496,7 +558,7 @@ void RoadNet::LoadWays(Landscape* land)
                 // The donor roadway LOD supplies ground contact properties.
                 if (donor->NLevels() > 0)
                 {
-                    const RoadDonorAppearance visual = FindDonorTopFace(donor->LevelOpaque(0));
+                    visual = FindDonorTopFace(donor->LevelOpaque(0));
                     texture = visual.texture;
                     donorSpecial = visual.special;
                 }
@@ -576,8 +638,6 @@ void RoadNet::LoadWays(Landscape* land)
                     perp *= 1.0f / norm;
                 const float dot = std::fabs(perp.X() * after.X() + perp.Z() * after.Z());
                 const float halfWidth = way.width * 0.5f / floatMax(dot, 0.4f);
-                const float v = texture->VToPhysical(uvDistance[i] / way.width);
-
                 for (int k = 0; k <= across; ++k)
                 {
                     const float u = static_cast<float>(k) / across;
@@ -586,7 +646,19 @@ void RoadNet::LoadWays(Landscape* land)
                     pos[1] = land->SurfaceY(pos.X(), pos.Z(), &dx, &dz) + RoadWaySurfaceOffset;
                     Vector3 normal(-dx, 1, -dz);
                     normal.Normalize();
-                    mesh->AddVertexFast(pos, normal, ClipAll, texture->UToPhysical(u), v);
+                    float uu = u, vv = uvDistance[i] / way.width;
+                    if (visual.hasUV)
+                    {
+                        // Stretch the donor's top-surface cross-section over the
+                        // user-selected width, while repeating the donor's
+                        // longitudinal UV slope in physical metres.
+                        const float donorX = visual.xMin + (visual.xMax - visual.xMin) * u;
+                        const float donorZ = visual.zMin + uvDistance[i];
+                        uu = visual.uC + visual.uX * donorX + visual.uZ * donorZ;
+                        vv = visual.vC + visual.vX * donorX + visual.vZ * donorZ;
+                    }
+                    mesh->AddVertexFast(pos, normal, ClipAll,
+                                        texture->UToPhysical(uu), texture->VToPhysical(vv));
                 }
 
                 if (i > first)
