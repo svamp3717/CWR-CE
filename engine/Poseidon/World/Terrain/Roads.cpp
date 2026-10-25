@@ -151,7 +151,11 @@ int RoadNet::WayFaceFlags(int donorFlags, bool donorProvided, bool blendTexture)
         // Keep original UV clamp, alpha and surface draw-order flags.
         // Only strip flags that could hide the road, render it as water,
         // or let it render straight through terrain geometry.
-        return donorFlags & ~(IsHidden | IsHiddenProxy | IsWater | IsShadow | NoZBuf);
+        // Procedural ribbons follow the terrain at centimeter clearance
+        // rather than occupying a rigid donor P3D surface. Prevent their
+        // translucent texels from writing depth and clipping subsequent
+        // terrain/decal fragments. Keep donor UV and alpha ordering intact.
+        return (donorFlags & ~(IsHidden | IsHiddenProxy | IsWater | IsShadow | NoZBuf)) | NoZWrite;
     }
     // Existing .ways entries with a direct .paa/.pac texture have no
     // donor geometry to obtain flags from. Preserve their previous fallback.
