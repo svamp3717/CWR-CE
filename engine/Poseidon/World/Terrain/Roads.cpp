@@ -48,6 +48,14 @@ RoadLink::RoadLink(Vector3Par from, Vector3Par to, float width, Texture* texture
         _con[i] = nullptr;
 }
 
+void RoadLink::UpdateWayHeights(Landscape* land)
+{
+    if (!IsWay())
+        return;
+    for (int i = 0; i < _nCon; ++i)
+        _pos[i][1] = land->SurfaceY(_pos[i].X(), _pos[i].Z()) + RoadWaySurfaceOffset;
+}
+
 // Project in the horizontal plane: generated ways follow terrain rather than
 // a model's roadway LOD. This is also used by the collision surface query.
 static float WayDistance2XZ(float x, float z, Vector3Par from, Vector3Par to)
