@@ -49,6 +49,10 @@ choose widths and map road texture paths, and write the node/way records.
 
 * Each way is subdivided into terrain-following sections approximately
   2 metres long and triangulated across its width in 1.5-metre strips.
+  Both the base asphalt and overlay ribbons use upward-facing polygon
+  winding, consistent with the engine's legacy `PolyVertices::GetNormal`
+  convention. The initial generated ribbons had reversed face winding,
+  causing culling/clipping and potentially incorrect lighting.
   The geometry samples the terrain at every vertex with a 7.5 cm clearance,
   rather than connecting two floating or buried edges. Long ways are split
   into render chunks that fit legacy vertex-index limits.
@@ -60,10 +64,13 @@ choose widths and map road texture paths, and write the node/way records.
   horizontal UV clamping, ordered-alpha blending and on-surface routing.
   For example, the original `wg_osmways4` donors use `0x00024102`
   (OnSurface, IsAlpha, ClampU, IsAlphaOrdered). The engine previously replaced
-  this with generic NoClamp/NoZWrite flags, changing the road colours even
-  when the correct donor texture was selected. Separate opaque and translucent
-  generated-road passes now follow the legacy P3D ordering; repeated donor
-  faces using the same texture are not blended over themselves.
+  this with generic NoClamp/NoZWrite flags, changing road sampling even
+  when the correct donor texture was selected. The generated ribbon retains
+  its own NoZWrite protection so a terrain-draped alpha layer cannot clip
+  later geometry by modifying the depth buffer. A previous experiment
+  splitting road rendering across two draw passes was reverted because it
+  introduced clipping regressions. Repeated donor faces using the same
+  texture are not blended over themselves.
   The generated sections also resolve the original
   `CfgTextureToMaterial` mapping and retain material references through
   editor-preview transitions. The generator reconstructs donor UV tiling
