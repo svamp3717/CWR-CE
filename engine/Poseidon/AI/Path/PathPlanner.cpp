@@ -473,6 +473,7 @@ class AIPathPlanner : public IAIPathPlanner
 
     float _heuristic;
     bool _searching;
+    bool _usingWayRoute = false;
 
     CostFunction _costFunction;
     void* _param;
@@ -489,6 +490,7 @@ class AIPathPlanner : public IAIPathPlanner
     LSError Serialize(ParamArchive& ar) override;
 
     bool IsSearching() const override { return _searching; }
+    bool IsUsingWayRoute() const override { return _usingWayRoute; }
 
     int GetPlanSize() const override { return _plan.Size(); }
     float GetTotalCost() const override;
@@ -556,6 +558,7 @@ void AIPathPlanner::Init()
     _planPoints.Clear();
     _destination = VZero;
     _searching = false;
+    _usingWayRoute = false;
 }
 
 template <>
@@ -584,6 +587,7 @@ LSError AIPathPlanner::Serialize(ParamArchive& ar)
     {
         // do not save/load partial searching
         _searching = false;
+        _usingWayRoute = false;
         // _costFunction, _param already initialized
     }
     return LSOK;
@@ -598,6 +602,7 @@ bool AIPathPlanner::StartSearching(AI::ThinkImportance prec, VehicleWithAI* veh,
     }
     _vehicle = veh;
     _destination = ptEnd;
+    _usingWayRoute = false;
 
     MapCoord xs = toIntFloor(ptStart.X() * InvLandGrid);
     MapCoord zs = toIntFloor(ptStart.Z() * InvLandGrid);
@@ -678,6 +683,7 @@ bool AIPathPlanner::StartSearching(AI::ThinkImportance prec, VehicleWithAI* veh,
             _planPoints[_planPoints.Size() - 1] = ptEnd;
 
             _searching = false;
+            _usingWayRoute = true;
             LOG_DEBUG(AI, "Car road route: {} graph points, {} strategic goals, length {:.0f} m",
                       route.Size(), goals.size(), totalLength);
             return true;
@@ -1517,7 +1523,10 @@ int AIPathPlanner::FindBestIndex(Vector3Par pos) const
             planIndex = i;
         }
     }
-    planIndex += 2;
+    // The legacy plan looks two grid cells ahead. Procedural goals are
+    // already spaced about 18 m and may be on opposite sides of a bend;
+    // skipping another goal can cause the car to cut across the corner.
+    planIndex += _usingWayRoute ? 1 : 2;
     saturate(planIndex, 0, _plan.Size() - 1);
     return planIndex;
 }
