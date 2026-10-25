@@ -1,10 +1,9 @@
 name: CI
 
+# Build only when explicitly requested from the Actions tab.
+# No automatic builds on main, feature branches, or pull requests.
 on:
-  push:
-    branches:
-      - main
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read

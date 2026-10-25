@@ -11,6 +11,10 @@ inputs:
   build-dir:
     description: Build directory the preset writes to.
     required: true
+  build-target:
+    description: Optional CMake target to build instead of building all targets.
+    required: false
+    default: ''
   ctest-exclude:
     description: Regex of tests to exclude (ctest -E). Empty runs all.
     required: false
@@ -122,9 +126,15 @@ runs:
         -DCMAKE_CXX_COMPILER_LAUNCHER=${{ inputs.use-ccache == 'true' && 'ccache' || '' }}
         ${{ inputs.extra-cmake-args }}
 
-    - name: Build
+    - name: Build all targets
+      if: inputs.build-target == ''
       shell: bash
       run: cmake --build ${{ inputs.build-dir }} --parallel 2
+
+    - name: Build requested target
+      if: inputs.build-target != ''
+      shell: bash
+      run: cmake --build ${{ inputs.build-dir }} --target ${{ inputs.build-target }} --parallel 2
 
     - name: Test
       if: inputs.run-tests == 'true'
