@@ -1722,9 +1722,9 @@ namespace Poseidon
 
 #endif
 
-// Model-free road ribbons use the same legacy textured-mesh pipeline as
-// ground polygons. Their positions, UVs and material come from RoadNet ways,
-// not from individually placed road P3D models.
+// Use the same Shape::Draw / material preparation as donor road P3Ds.
+// Drawing road UVs through Landscape::DrawMesh bypasses model materials,
+// making their colours/blending differ even with an identical texture.
 void Landscape::DrawRoadWays(const LandBegEnd& bigRect, Scene& scene)
 {
     if (!GRoadNet || !GRoadNet->HasWays())
@@ -1734,15 +1734,24 @@ void Landscape::DrawRoadWays(const LandBegEnd& bigRect, Scene& scene)
     const float maxX = bigRect.xEnd * _landGrid;
     const float minZ = bigRect.zBeg * _landGrid;
     const float maxZ = bigRect.zEnd * _landGrid;
+    const Matrix4 identity(MIdentity); // ribbons are already world-space
+
     for (const auto& mesh : GRoadNet->WayMeshes())
     {
         const Vector3 min = mesh->Min();
         const Vector3 max = mesh->Max();
         if (max.X() < minX || min.X() > maxX || max.Z() < minZ || min.Z() > maxZ)
             continue;
-        TLVertexTable table;
-        table.DoTransformPoints(&GAnimatorDefault, *mesh, scene.ScaledInvTransform());
-        DrawMesh(scene, table, *mesh, VZero, bigRect, false, true);
+        if (scene.GetCamera()->IsClipped(mesh->BSphereCenter(), mesh->BSphereRadius(), 1))
+            continue;
+
+        LightList lightsStorage(true);
+        const LightList& lights = scene.SelectLights(mesh->BSphereCenter(), mesh->BSphereRadius(), lightsStorage);
+        const float distance = scene.GetCamera()->Position().Distance(mesh->BSphereCenter()) - mesh->BSphereRadius();
+        mesh->PrepareTextures(Square(floatMax(distance, 0.f)), 0);
+        // IsOnSurface matches the model road/decal render state and bias.
+        // No object instances are created; the shape holds generated vertices.
+        mesh->Draw(&GAnimatorDefault, lights, ClipAll, IsOnSurface, identity, identity);
     }
 }
 
