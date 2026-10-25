@@ -713,7 +713,7 @@ class Landscape: public SerializeClass
 		const LandBegEnd &bigRect, Scene &scene, const GroundLayerInfo &layer
 	);
 
-	void DrawRoadWays(const LandBegEnd& bigRect, Scene& scene, bool blendedPass);
+	void DrawRoadWays(const LandBegEnd& bigRect, Scene& scene);
 	void PrepareInstancedTerrain();
 	void DrawGroundInstanced(const LandBegEnd &bigRect, Scene &scene);
 
