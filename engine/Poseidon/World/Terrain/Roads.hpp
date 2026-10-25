@@ -109,6 +109,14 @@ struct RoadWaySegment
 
 
 
+// Map rendering uses unsampled source segments to avoid tens of thousands
+// of 2-metre draw calls when zoomed out.
+struct RoadWayMapSegment
+{
+    Vector3 from, to;
+    float width;
+};
+
 class RoadNet: public RefCount
 {
 	// road information kept separate from objects (in object-like manner)
@@ -116,6 +124,7 @@ class RoadNet: public RefCount
 	//BIG_ARRAY<RoadList,LandRange,LandRange> _roads; // all roads
 	Array2D<RoadList> _roads;
 	std::vector<RoadWaySegment> _waySegments;
+	std::vector<RoadWayMapSegment> _wayMapSegments;
 	std::vector<std::unique_ptr<Shape>> _wayMeshes;
 	//BIG_ARRAY<RoadList,LandRange,LandRange> _roads; // all roads
 
@@ -139,6 +148,7 @@ class RoadNet: public RefCount
 	bool WaySurface(float x, float z, float tolerance, Texture **texture = nullptr) const;
 	const std::vector<std::unique_ptr<Shape>> &WayMeshes() const {return _wayMeshes;}
 	const std::vector<RoadWaySegment> &WaySegments() const {return _waySegments;}
+	const std::vector<RoadWayMapSegment> &WayMapSegments() const {return _wayMapSegments;}
 
 	bool SearchPath( Vector3Par from, Vector3Par to, RoadPathArray &path, float prec = 0) const;
 	const RoadLink *IsOnRoad( Vector3Par pos, float size ) const;
