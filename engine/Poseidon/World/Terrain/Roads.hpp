@@ -22,10 +22,11 @@ class RoadLink
 	int _locks;
 	OLink<Object> _object;
 	float _wayHalfWidth = 0; // positive for generated way segments
+	Texture *_wayTexture = nullptr;
 
 	public:
 	RoadLink( Object *object, Vector3 *pos, int c );
-	RoadLink( Vector3Par from, Vector3Par to, float width ); // no P3D object
+	RoadLink( Vector3Par from, Vector3Par to, float width, Texture *texture ); // no P3D object
 	~RoadLink(){}
 
 	__forceinline int NConnections() const {return _nCon;}
@@ -42,6 +43,8 @@ class RoadLink
 	void Unlock() {_locks--;}
 
 	Object *GetObject() const {return _object;}
+	bool IsWay() const {return _wayHalfWidth > 0;}
+	Texture *WayTexture() const {return _wayTexture;}
 	bool IsInside(Vector3Val pos, float size) const;
 	
 	USE_FAST_ALLOCATOR
