@@ -90,14 +90,22 @@ choose widths and map road texture paths, and write the node/way records.
   place**, keeping road-link pointers stable for AI; reloading a WRP creates
   a new graph. Repeat geography initialization for editor preview reuses
   the graph when the same world is still loaded.
-* Generated-way A* search uses an indexed visited-node table. This avoids
+* Generated-way A* search uses an indexed visited-node table with the
+  road pointer initialized before insertion; otherwise searches could
+  revisit or miss links and fall back to cross-country routing. This avoids
   quadratic path lookups with dense, 2-metre road segments. The start of a
   car route accepts the same allowed road-approach tolerance as the end.
   For connected roads, wheeled and tracked vehicles now preserve an actual
   graph-derived polyline as strategic goals rather than reducing the route
   to start and finish and driving through fields. About every 18 metres
-  (and at sharp turns), the AI gets a steering target, then runs the
-  existing operative road A* between goals even at strategic think levels.
+  (and at sharp turns), the AI gets a strategic goal. Operative vehicle
+  steering independently follows the full graph route to the actual
+  destination, sampled at approximately 6 metres to stay close to curved
+  pavement without processing every 2-metre graph link every frame.
+  It does not append the legacy straight-line strategic chords or report
+  a waypoint completed merely upon reaching an intermediate road point.
+  Generated road plans are explicitly marked so P3D-only plans keep their
+  original behavior.
   Editor waypoints up to 35 metres from a road can still use the road and
   leave it for the final approach; vehicles can join a road from within
   12 metres. If no connected way can be found, legacy terrain A* remains
