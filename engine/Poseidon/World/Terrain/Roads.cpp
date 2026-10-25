@@ -162,6 +162,23 @@ int RoadNet::WayFaceFlags(int donorFlags, bool donorProvided, bool blendTexture)
     return NoClamp | NoZWrite | (blendTexture ? IsAlpha : 0);
 }
 
+// Both the asphalt and narrow donor overlay bands use the same winding.
+// PolyVertices::GetNormal computes (p2-p0) x (p1-p0); because increasing
+// the row follows the way and increasing the column crosses to its right,
+// winding must be reversed relative to the standard (p1-p0) x (p2-p0).
+void RoadNet::AddWayQuad(Shape& mesh, Poly& face, int previousRow, int nextRow)
+{
+    face.SetN(3);
+    face.Set(0, previousRow);
+    face.Set(1, previousRow + 1);
+    face.Set(2, nextRow);
+    mesh.AddFace(face);
+    face.Set(0, previousRow + 1);
+    face.Set(1, nextRow + 1);
+    face.Set(2, nextRow);
+    mesh.AddFace(face);
+}
+
 void RoadNet::Scan(Landscape* land)
 {
     // Array2D::Dim preserves old elements when dimensions match! A rebuild
@@ -674,11 +691,7 @@ void AppendDonorBandMeshes(std::vector<std::unique_ptr<Shape>>& meshes, Landscap
                 {
                     const int prev = static_cast<int>(i - first - 1) * rowSize + k;
                     const int next = static_cast<int>(i - first) * rowSize + k;
-                    poly.SetN(3);
-                    poly.Set(0, prev); poly.Set(1, prev + 1); poly.Set(2, next);
-                    mesh->AddFace(poly);
-                    poly.Set(0, prev + 1); poly.Set(1, next + 1); poly.Set(2, next);
-                    mesh->AddFace(poly);
+                    RoadNet::AddWayQuad(*mesh, poly, prev, next);
                 }
         }
         mesh->CalculateMinMax();
@@ -922,11 +935,7 @@ void RoadNet::LoadWays(Landscape* land)
                     {
                         const int prev = static_cast<int>(i - first - 1) * rowSize + k;
                         const int next = static_cast<int>(i - first) * rowSize + k;
-                        poly.SetN(3);
-                        poly.Set(0, prev); poly.Set(1, prev + 1); poly.Set(2, next);
-                        mesh->AddFace(poly);
-                        poly.Set(0, prev + 1); poly.Set(1, next + 1); poly.Set(2, next);
-                        mesh->AddFace(poly);
+                        AddWayQuad(*mesh, poly, prev, next);
                     }
             }
             mesh->CalculateMinMax();
