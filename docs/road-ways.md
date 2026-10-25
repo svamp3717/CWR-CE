@@ -96,6 +96,10 @@ choose widths and map road texture paths, and write the node/way records.
   For connected roads, wheeled and tracked vehicle strategic planning can
   use the road graph directly before falling back to the legacy terrain
   search, which may reject narrow roads on otherwise impassable cells.
+  Generated road links are not locked by parked vehicles: locking several
+  contiguous ~2 m links would disconnect the only road route. Terrain-cell
+  occupancy and vehicle collision avoidance still apply, and legacy P3D
+  road-link locking is unchanged.
 * The world log reports the resolved base texture, contact texture, donor
   UV availability, and number of overlay bands once per donor, to help
   diagnose asset-specific differences.
