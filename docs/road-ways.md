@@ -37,7 +37,9 @@ The third field supports two backwards-compatible forms:
   the visible texture is used for both.
 * `data\\YOUR_ROAD.pac` / `.paa`: use the explicitly provided texture for
   both visible road geometry and ground-contact effects. Older `.ways`
-  files using texture paths still work.
+  files using texture paths still work, but their default 0–1 UV mapping
+  cannot reproduce donor-specific offsets, mirroring or tiling. For the
+  closest visual match to an existing road model use `donor=...p3d`.
 
 This is an **OSM-inspired native map representation**, not an OSM XML / PBF
 importer. Convert geographic OSM coordinates to local terrain coordinates,
@@ -53,9 +55,11 @@ choose widths and map road texture paths, and write the node/way records.
 * The donor's **largest upward-facing textured polygon** supplies the
   ribbon's visible road texture. This avoids accidentally using an edge,
   kerb, or underside texture just because it is the first P3D face.
-  Alpha-bearing textures are composited *after* opaque terrain with their
-  alpha intact, and generated roads use neutral model lighting rather
-  than the terrain cell's colour-palette tint.
+  Alpha-bearing textures are composited *after* opaque terrain. Generated
+  roads render with the same Shape/material pipeline as P3D road models,
+  rather than applying terrain-cell palette tint or using the terrain's
+  simpler polygon renderer. Donor UV tiling and offsets are reconstructed
+  from the selected face instead of assuming a generic 0–1 mapping.
 * UVs repeat the donor's **visible** road texture along the way. Vehicle
   `GroundCollision` contacts and `RoadSurfaceY` use the donor's **roadway**
   texture, so existing friction/roughness, dust, ground sounds, and effects
@@ -77,8 +81,13 @@ choose widths and map road texture paths, and write the node/way records.
 * Generated ways currently follow terrain. Elevated bridges, tunnels, road
   banking, kerbs, lane markings, and arbitrary grade-separated intersections
   still require explicit modelling or future extensions.
-* Terrain elevation changes refresh the mesh automatically. Changing the
-  way definitions or donor texture requires reloading the world.
+* Terrain elevation changes refresh road vertex heights and normals **in
+  place**, keeping road-link pointers stable for AI; reloading a WRP creates
+  a new graph. Repeat geography initialization for editor preview reuses
+  the graph when the same world is still loaded.
+* Generated-way A* search uses an indexed visited-node table. This avoids
+  quadratic path lookups with dense, 2-metre road segments.
+* Changing way definitions or donor textures requires reloading the world.
 * Generated ribbons currently use the compatibility terrain mesh renderer;
   very large road datasets will benefit from spatial batching and a dedicated
   instanced rendering path.
