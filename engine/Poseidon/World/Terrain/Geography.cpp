@@ -124,8 +124,20 @@ void Landscape::StampWayGeography()
         }
 }
 
+// Rebuild generated geometry (and its spatial index) after terrain height
+// edits or resampling, rather than leaving strips at obsolete elevations.
+void Landscape::RefreshWayTerrain()
+{
+    _roadWayGeometryDirty = false;
+    if (this != GLandscape || !GRoadNet || !GRoadNet->HasWays())
+        return;
+    GRoadNet->Build(this);
+    StampWayGeography();
+}
+
 void Landscape::InitGeography()
 {
+    _roadWayGeometryDirty = false;
     GRoadNet = new RoadNet;
     GRoadNet->Build(this);
 
