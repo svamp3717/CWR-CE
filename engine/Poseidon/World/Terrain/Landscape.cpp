@@ -2430,15 +2430,16 @@ Object* Landscape::ObjectCreate(int id, LODShapeWithShadow* shape, const Matrix4
     mark(Stage::Factory);
     if (profile)
     {
-        const RStringB& property = shape->GetPropertyClass();
+        const char* property = shape->GetPropertyClass();
         WrpObjectProfile::Kind kind = WrpObjectProfile::Other;
-        if (property == "forest")
+        if (strcmp(property, "forest") == 0)
             kind = WrpObjectProfile::Forest;
-        else if (property == "road")
+        else if (strcmp(property, "road") == 0)
             kind = WrpObjectProfile::Road;
-        else if (property == "streetlamp")
+        else if (strcmp(property, "streetlamp") == 0)
             kind = WrpObjectProfile::StreetLamp;
-        else if (property == "house" || property == "vehicle" || property == "church")
+        else if (strcmp(property, "house") == 0 || strcmp(property, "vehicle") == 0 ||
+                 strcmp(property, "church") == 0)
             kind = WrpObjectProfile::Building;
         profile->RecordFactoryKind(kind, factoryStarted, last);
     }
