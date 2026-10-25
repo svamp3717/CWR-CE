@@ -14,7 +14,7 @@ namespace Poseidon
 {
 class RoadLink
 {
-	enum {NCon=4};
+	enum {NCon=8};
 	Vector3 _pos[NCon];
 	RoadLink *_con[NCon];
 	int _nCon;
@@ -30,6 +30,7 @@ class RoadLink
 	~RoadLink(){}
 
 	__forceinline int NConnections() const {return _nCon;}
+	__forceinline int MaxConnections() const {return NCon;}
 	__forceinline const Vector3 *PosConnections() const {return _pos;}
 	__forceinline RoadLink * const *Connections() const {return _con;}
 	__forceinline void SetConnection( int i, RoadLink *con ){_con[i]=con;}
@@ -115,6 +116,7 @@ class RoadNet: public RefCount
 
 	inline RoadList &SelectRoadList( float x, float z );
 	void LoadWays(Landscape *land);
+	void ConnectWayJunctions();
 
 	public:
 	RoadNet();
