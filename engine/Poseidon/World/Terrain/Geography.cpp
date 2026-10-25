@@ -131,8 +131,8 @@ void Landscape::RefreshWayTerrain()
     _roadWayGeometryDirty = false;
     if (!GRoadNet || !GRoadNet->HasWays())
         return;
-    GRoadNet->Build(this);
-    StampWayGeography();
+    GRoadNet->RefreshWayHeights(this);
+    // The XY graph and road geography footprint are unchanged.
 }
 
 void Landscape::InitGeography()
