@@ -372,7 +372,18 @@ RoadDonorAppearance FindDonorTopFace(Shape* shape)
     if (!shape)
         return result;
 
-    float largestTopArea = 0.f;
+    // Choose by the TOTAL upward-facing area for each material. Selecting
+    // one largest face could pick a huge shoulder polygon over six smaller
+    // asphalt panels and then incorrectly stretch shoulder colour across
+    // the full road.
+    struct Candidate
+    {
+        Texture* texture;
+        float area;
+        float largestFace;
+        Offset representative;
+    };
+    std::vector<Candidate> candidates;
     Offset selected = shape->EndFaces();
     for (Offset face = shape->BeginFaces(); face < shape->EndFaces(); shape->NextFace(face))
     {
@@ -381,11 +392,36 @@ RoadDonorAppearance FindDonorTopFace(Shape* shape)
         if (!texture)
             continue;
         const float topArea = polygon.GetAreaTop(*shape);
-        if (topArea > largestTopArea)
+        if (topArea <= 0.001f)
+            continue;
+        auto it = std::find_if(candidates.begin(), candidates.end(),
+            [texture](const Candidate& c) { return c.texture == texture; });
+        if (it == candidates.end())
         {
-            largestTopArea = topArea;
-            selected = face;
-            result.texture = texture;
+            candidates.push_back({texture, topArea, topArea, face});
+        }
+        else
+        {
+            it->area += topArea;
+            if (topArea > it->largestFace)
+            {
+                it->largestFace = topArea;
+                it->representative = face;
+            }
+        }
+    }
+    float bestScore = 0.f;
+    for (const Candidate& c : candidates)
+    {
+        const Poly& polygon = shape->Face(c.representative);
+        const bool alpha = c.texture->GetAlphaClass() == AlphaStats::Blend ||
+            (polygon.Special() & IsAlpha) != 0;
+        const float score = c.area * (alpha ? 0.5f : 1.f);
+        if (score > bestScore)
+        {
+            bestScore = score;
+            selected = c.representative;
+            result.texture = c.texture;
             result.special = polygon.Special() | shape->Special();
         }
     }
