@@ -269,6 +269,9 @@ int Landscape::LoadData(const char* name, float landGrid)
     }
     else if (LoadOptimized(f, landGrid))
     {
+        // Optimized WRP provides geography but still needs a live road graph,
+        // including optional model-free .ways sidecars.
+        InitGeography();
         ret = LSOK;
     }
     else
