@@ -192,7 +192,9 @@ void Landscape::DrawMesh(Scene& scene, TLVertexTable& table, const Shape& vMesh,
     }
 
     GEngine->PrepareMesh(render::LegacySpec{});
-    _engine->SetBias(0);
+    // Model roads use the same surface-offset bias. It prevents roads
+    // from fighting the terrain depth buffer at oblique camera angles.
+    _engine->SetBias(isRoad ? 0x10 : 0);
 
     table.DoPerspective(*scene.GetCamera(), orClip);
 
@@ -1785,7 +1787,17 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
         {
             DrawGround(bigRect, scene, opaqueLayer);
         }
-        DrawRoadWays(bigRect, scene);
+        if (GRoadNet && GRoadNet->HasWays())
+        {
+            // Opaque terrain must have reached the framebuffer before
+            // donor road surfaces are alpha-composited over it. Otherwise
+            // texture batching can paint terrain on top or multiply blends.
+            GEngine->FlushQueues();
+            GEngine->EnableReorderQueues(false);
+            DrawRoadWays(bigRect, scene);
+            GEngine->FlushQueues();
+            GEngine->EnableReorderQueues(true);
+        }
     }
 #endif
 
