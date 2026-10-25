@@ -7,6 +7,8 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
 #include <Poseidon/Foundation/Containers/Array2D.hpp>
+#include <memory>
+#include <vector>
 
 namespace Poseidon
 {
@@ -19,9 +21,11 @@ class RoadLink
 
 	int _locks;
 	OLink<Object> _object;
+	float _wayHalfWidth = 0; // positive for generated way segments
 
 	public:
 	RoadLink( Object *object, Vector3 *pos, int c );
+	RoadLink( Vector3Par from, Vector3Par to, float width ); // no P3D object
 	~RoadLink(){}
 
 	__forceinline int NConnections() const {return _nCon;}
@@ -33,7 +37,7 @@ class RoadLink
 	Vector3 GetCenter() const;
 	float NearestConnectionDist2(Vector3Val pos) const;
 
-	bool IsLocked() const {return _locks > 0 || !_object || _object->IsDammageDestroyed();}
+	bool IsLocked() const {return _locks > 0 || (_wayHalfWidth <= 0 && (!_object || _object->IsDammageDestroyed()));}
 	void Lock() {_locks++;}
 	void Unlock() {_locks--;}
 
@@ -85,6 +89,16 @@ class RoadList
 
 typedef StaticArray<Vector3> RoadPathArray;
 
+// OSM-style polyline edges. Their texture is the same Texture used by road
+// roadway polygons, so surface sounds and ground effects use the same material.
+struct RoadWaySegment
+{
+    Vector3 from, to;
+    float width = 0;
+    Ref<Texture> texture;
+};
+
+
 
 class RoadNet: public RefCount
 {
@@ -92,9 +106,12 @@ class RoadNet: public RefCount
 
 	//BIG_ARRAY<RoadList,LandRange,LandRange> _roads; // all roads
 	Array2D<RoadList> _roads;
+	std::vector<RoadWaySegment> _waySegments;
+	std::vector<std::unique_ptr<Shape>> _wayMeshes;
 	//BIG_ARRAY<RoadList,LandRange,LandRange> _roads; // all roads
 
 	inline RoadList &SelectRoadList( float x, float z );
+	void LoadWays(Landscape *land);
 
 	public:
 	RoadNet();
@@ -106,6 +123,11 @@ class RoadNet: public RefCount
 	void Compact(); // optimize memory picture
 
 	void Build( Landscape *land ); // all steps together
+
+	bool HasWays() const {return !_waySegments.empty();}
+	// Spatial queries and procedural rendering share the exact way data.
+	bool WaySurface(float x, float z, float tolerance, Texture **texture = nullptr) const;
+	const std::vector<std::unique_ptr<Shape>> &WayMeshes() const {return _wayMeshes;}
 
 	bool SearchPath( Vector3Par from, Vector3Par to, RoadPathArray &path, float prec = 0) const;
 	const RoadLink *IsOnRoad( Vector3Par pos, float size ) const;
