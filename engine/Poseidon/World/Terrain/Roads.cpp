@@ -287,17 +287,52 @@ bool ReadWayDefinitions(const std::string& data,
     return true;
 }
 
-// Use the donor's original textures instead of guessing a road texture
-// from its file name. Visual LOD supplies pixels/UV appearance; roadway
-// LOD supplies the contact material (roughness, dust and sound environment).
-Texture* FirstFaceTexture(Shape* shape)
+// Do not take the *first* face of a P3D model. Roads may start with an
+// underside or a shoulder/edge face, with a different (often dark) texture.
+// GetAreaTop measures the projected, upward-facing area, so the dominant
+// driveable face determines the surface appearance.
+struct RoadDonorAppearance
 {
+    Texture* texture = nullptr;
+    int special = 0;
+};
+
+RoadDonorAppearance FindDonorTopFace(Shape* shape)
+{
+    RoadDonorAppearance result;
     if (!shape)
-        return nullptr;
+        return result;
+
+    float largestTopArea = 0.f;
     for (Offset face = shape->BeginFaces(); face < shape->EndFaces(); shape->NextFace(face))
-        if (Texture* texture = shape->Face(face).GetTexture())
-            return texture;
-    return nullptr;
+    {
+        const Poly& polygon = shape->Face(face);
+        Texture* texture = polygon.GetTexture();
+        if (!texture)
+            continue;
+        const float topArea = polygon.GetAreaTop(*shape);
+        if (topArea > largestTopArea)
+        {
+            largestTopArea = topArea;
+            result.texture = texture;
+            result.special = polygon.Special() | shape->Special();
+        }
+    }
+
+    // Some very old models have reversed visible faces. Fall back only if
+    // there is no upward-facing, textured polygon.
+    if (!result.texture)
+        for (Offset face = shape->BeginFaces(); face < shape->EndFaces(); shape->NextFace(face))
+        {
+            const Poly& polygon = shape->Face(face);
+            if (polygon.GetTexture())
+            {
+                result.texture = polygon.GetTexture();
+                result.special = polygon.Special() | shape->Special();
+                break;
+            }
+        }
+    return result;
 }
 
 bool IsDonorName(const std::string& name)
@@ -423,6 +458,7 @@ void RoadNet::LoadWays(Landscape* land)
 
         Ref<Texture> texture;
         Ref<Texture> surfaceTexture;
+        int donorSpecial = 0;
         if (IsDonorName(way.texture))
         {
             const std::string donorPath = way.texture.compare(0, 6, "donor=") == 0
@@ -430,8 +466,15 @@ void RoadNet::LoadWays(Landscape* land)
             Ref<LODShapeWithShadow> donor = Shapes.New(donorPath.c_str(), false, true);
             if (donor)
             {
-                texture = FirstFaceTexture(donor->LevelOpaque(0));
-                surfaceTexture = FirstFaceTexture(donor->RoadwayLevel());
+                // The top visual face supplies the exact road appearance.
+                // The donor roadway LOD supplies ground contact properties.
+                if (donor->NLevels() > 0)
+                {
+                    const RoadDonorAppearance visual = FindDonorTopFace(donor->LevelOpaque(0));
+                    texture = visual.texture;
+                    donorSpecial = visual.special;
+                }
+                surfaceTexture = FindDonorTopFace(donor->RoadwayLevel()).texture;
             }
             if (!surfaceTexture)
                 surfaceTexture = texture;
@@ -484,7 +527,15 @@ void RoadNet::LoadWays(Landscape* land)
             Poly poly;
             poly.Init();
             poly.SetTexture(texture);
-            poly.SetSpecial(NoClamp | NoZWrite);
+            // Road P3Ds frequently use alpha-blended top textures: dirt,
+            // asphalt and shoulders are intentionally blended over terrain.
+            // The original ribbon was forced opaque, exposing dark texels
+            // instead of their alpha-composited colour.
+            int surfaceFlags = NoClamp | NoZWrite;
+            if ((donorSpecial & (IsAlpha | IsTransparent)) != 0 ||
+                texture->GetAlphaClass() == AlphaStats::Blend)
+                surfaceFlags |= IsAlpha;
+            poly.SetSpecial(surfaceFlags);
             for (size_t i = first; i < last; ++i)
             {
                 const Vector3 before = i == 0 ? WayPerpendicular(points[0], points[1])
