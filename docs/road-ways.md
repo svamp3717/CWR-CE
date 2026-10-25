@@ -50,6 +50,12 @@ choose widths and map road texture paths, and write the node/way records.
   The geometry samples the terrain at every vertex with a 7.5 cm clearance,
   rather than connecting two floating or buried edges. Long ways are split
   into render chunks that fit legacy vertex-index limits.
+* The donor's **largest upward-facing textured polygon** supplies the
+  ribbon's visible road texture. This avoids accidentally using an edge,
+  kerb, or underside texture just because it is the first P3D face.
+  Alpha-bearing textures are composited *after* opaque terrain with their
+  alpha intact, and generated roads use neutral model lighting rather
+  than the terrain cell's colour-palette tint.
 * UVs repeat the donor's **visible** road texture along the way. Vehicle
   `GroundCollision` contacts and `RoadSurfaceY` use the donor's **roadway**
   texture, so existing friction/roughness, dust, ground sounds, and effects
