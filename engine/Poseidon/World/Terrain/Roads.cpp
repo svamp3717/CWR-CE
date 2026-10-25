@@ -1078,25 +1078,26 @@ bool operator<=(RoadNode& a, RoadNode& b)
 
 typedef HeapArray<RoadNode*, MemAllocSS> RoadOpenList;
 
+// Generated ways can create many thousands of road links. Previously every
+// A* successor scanned all visited nodes, giving O(N^2) path lookup cost.
+// AI preview starts navigation immediately, so this could stall badly.
 class RoadNodeContainer : public AutoArray<SRef<RoadNode>>
 {
-  public:
-    RoadNode* Find(RoadLink* link) const;
-};
+    std::unordered_map<RoadLink*, RoadNode*> _visited;
 
-RoadNode* RoadNodeContainer::Find(RoadLink* link) const
-{
-    int i, n = Size();
-    for (i = 0; i < n; i++)
+  public:
+    RoadNode* Find(RoadLink* link) const
     {
-        RoadNode* node = Get(i);
-        if (node->road == link)
-        {
-            return node;
-        }
+        auto it = _visited.find(link);
+        return it == _visited.end() ? nullptr : it->second;
     }
-    return nullptr;
-}
+
+    void AddNode(RoadNode* node)
+    {
+        _visited[node->road] = node;
+        Add(node);
+    }
+};
 
 inline float RoadCost(Vector3Par from, Vector3Par to)
 {
@@ -1171,7 +1172,7 @@ bool RoadNet::SearchPath(Vector3Par from, Vector3Par to, RoadPathArray& path, fl
                 if (item->IsInside(to, prec))
                 {
                     best = new RoadNode;
-                    container.Add(best);
+                    container.AddNode(best);
                     best->parent = nullptr;
                     best->road = item;
                     best->pos = to;                                             // item->PosConnections()[jBest];
@@ -1254,7 +1255,7 @@ bool RoadNet::SearchPath(Vector3Par from, Vector3Par to, RoadPathArray& path, fl
             else
             {
                 cur = new RoadNode;
-                container.Add(cur);
+                container.AddNode(cur);
                 cur->parent = best;
                 cur->road = item;
                 cur->pos = pos;
