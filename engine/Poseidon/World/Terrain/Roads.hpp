@@ -12,6 +12,10 @@
 
 namespace Poseidon
 {
+// Lift the ribbon above the underlying terrain to avoid z-fighting.
+// Ground collision and road surface queries use the same height.
+constexpr float RoadWaySurfaceOffset = 0.18f;
+
 class RoadLink
 {
 	enum {NCon=8};
@@ -99,7 +103,8 @@ struct RoadWaySegment
 {
     Vector3 from, to;
     float width = 0;
-    Ref<Texture> texture;
+    Ref<Texture> texture; // visible road surface
+    Ref<Texture> surfaceTexture; // donor roadway/contact texture
 };
 
 
@@ -133,6 +138,7 @@ class RoadNet: public RefCount
 	// Spatial queries and procedural rendering share the exact way data.
 	bool WaySurface(float x, float z, float tolerance, Texture **texture = nullptr) const;
 	const std::vector<std::unique_ptr<Shape>> &WayMeshes() const {return _wayMeshes;}
+	const std::vector<RoadWaySegment> &WaySegments() const {return _waySegments;}
 
 	bool SearchPath( Vector3Par from, Vector3Par to, RoadPathArray &path, float prec = 0) const;
 	const RoadLink *IsOnRoad( Vector3Par pos, float size ) const;
