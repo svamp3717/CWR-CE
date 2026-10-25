@@ -1,0 +1,48 @@
+name: Windows / Game EXE only
+
+# Manually run this lightweight build from the Actions tab.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_mtime,include_file_ctime
+  CCACHE_NOHASHDIR: true
+
+jobs:
+  game-windows:
+    name: Windows x64 / PoseidonGame
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build metadata
+        id: meta
+        shell: bash
+        run: echo "sha_short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      # This reuses the normal Windows toolchain, compiler and vcpkg caches,
+      # but only builds the game target (plus required linked libraries).
+      - name: Build PoseidonGame only
+        uses: ./.github/actions/build-cwr
+        with:
+          preset: win-x64-clang-rwdi
+          vcpkg-triplet: x64-windows-clang
+          build-dir: build/win-x64-clang-rwdi
+          build-target: PoseidonGame
+          run-tests: 'false'
+
+      - name: Upload Windows game
+        uses: actions/upload-artifact@v7
+        with:
+          name: Windows-x64-Game-only-${{ steps.meta.outputs.sha_short }}
+          path: |
+            dist/x64-win-rwdi/PoseidonGame.exe
+            dist/x64-win-rwdi/OpenAL32.dll
+            dist/x64-win-rwdi/OpenAL-Soft.LICENSE.txt
+          if-no-files-found: error
