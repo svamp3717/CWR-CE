@@ -1360,6 +1360,47 @@ inline float RoadHeur(Vector3Par from, Vector3Par to)
 #undef DIAGS
 #define DIAGS 0
 
+void RoadNet::SampleWayRoute(const RoadPathArray& route, std::vector<Vector3>& goals)
+{
+    goals.clear();
+    if (route.Size() == 0)
+        return;
+
+    // Fine 2 m road links make excellent route geometry, but thousands of
+    // them are too many strategic waypoints. Keep a goal approximately every
+    // 18 m AND every sharp bend/junction, preserving corners for the driver.
+    float totalLength = 0.f;
+    for (int i = 1; i < route.Size(); ++i)
+        totalLength += (route[i] - route[i - 1]).SizeXZ();
+    const float step = floatMax(18.f, totalLength / 750.f);
+
+    goals.reserve(std::min(route.Size(), 850));
+    goals.push_back(route[0]);
+    float sinceGoal = 0.f;
+    for (int i = 1; i + 1 < route.Size(); ++i)
+    {
+        const Vector3 before = route[i] - route[i - 1];
+        const Vector3 after = route[i + 1] - route[i];
+        const float bLen = before.SizeXZ();
+        const float aLen = after.SizeXZ();
+        sinceGoal += bLen;
+        const bool corner = bLen > 0.1f && aLen > 0.1f &&
+            before.X() * after.X() + before.Z() * after.Z() < 0.7071f * bLen * aLen;
+        if ((sinceGoal >= step || corner) &&
+            (route[i] - goals.back()).SquareSizeXZ() > Square(3.f))
+        {
+            goals.push_back(route[i]);
+            sinceGoal = 0.f;
+        }
+    }
+    const Vector3 destination = route[route.Size() - 1];
+    if (goals.size() > 1 &&
+        (destination - goals.back()).SquareSizeXZ() < Square(2.f))
+        goals.back() = destination;
+    else
+        goals.push_back(destination);
+}
+
 bool RoadNet::SearchPath(Vector3Par from, Vector3Par to, RoadPathArray& path, float prec) const
 {
     // maintain "open" list
