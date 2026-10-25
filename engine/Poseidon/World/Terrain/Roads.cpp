@@ -455,7 +455,33 @@ RoadDonorAppearance FindDonorTopFace(Shape* shape)
         }
     }
     if (selected != shape->EndFaces())
+    {
         ReadDonorUV(result, *shape, shape->Face(selected));
+        // The representative face may cover only the middle asphalt.
+        // Map its UV projection across the complete donor road width,
+        // leaving shoulders/markings to their own narrower bands.
+        if (result.hasUV)
+        {
+            float minX = 1e10f, maxX = -1e10f;
+            for (Offset face = shape->BeginFaces(); face < shape->EndFaces(); shape->NextFace(face))
+            {
+                const Poly& poly = shape->Face(face);
+                if (!poly.GetTexture() || poly.GetAreaTop(*shape) <= 0.001f)
+                    continue;
+                for (int k = 0; k < poly.N(); ++k)
+                {
+                    const float x = shape->Pos(poly.GetVertex(k)).X();
+                    minX = floatMin(minX, x);
+                    maxX = floatMax(maxX, x);
+                }
+            }
+            if (maxX > minX + 0.01f)
+            {
+                result.xMin = minX;
+                result.xMax = maxX;
+            }
+        }
+    }
     return result;
 }
 
@@ -778,8 +804,8 @@ void RoadNet::LoadWays(Landscape* land)
         }
         if (reportedMaterials.insert(way.texture).second)
             LOG_INFO(World,
-                     "Generated road material '{}': visual='{}', contact='{}', donorUV={}",
-                     way.texture, texture->Name(), surfaceTexture->Name(), visual.hasUV);
+                     "Generated road material '{}': visual='{}', contact='{}', donorUV={}, overlayBands={}",
+                     way.texture, texture->Name(), surfaceTexture->Name(), visual.hasUV, bands.size());
 
         // Keep original unsampled edges for the 2D map.
         for (size_t i = 1; i < way.nodes.size(); ++i)
