@@ -1,6 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/Roads.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/FileServer.hpp>
@@ -259,6 +260,9 @@ int Landscape::LoadData(const char* name, float landGrid)
     LOG_DEBUG(World, "Landscape::LoadData start");
     Log("Load landscape %s", name);
     _name = name; // remmember name
+    // A WRP reload must not reuse the old sidecar or texture-bank references,
+    // even when the Landscape instance and file name happen to be identical.
+    GRoadNet = nullptr;
     LSError ret = LSUnknownError;
     // FIX - allow worlds in banks
     QIFStreamB f;
