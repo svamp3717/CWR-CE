@@ -515,6 +515,88 @@ Vector3 WayPerpendicular(Vector3Par from, Vector3Par to)
         return VZero;
     return Vector3(-dz / length, 0, dx / length);
 }
+// Append one donor surface band as a separate textured ribbon. Every band
+// follows terrain, so shoulder materials need no road P3D geometry.
+void AppendDonorBandMeshes(std::vector<std::unique_ptr<Shape>>& meshes, Landscape* land,
+                           const std::vector<Vector3>& points,
+                           const std::vector<float>& uvDistance, float wayWidth,
+                           const RoadDonorBand& band)
+{
+    Texture* texture = band.appearance.texture;
+    if (!texture || points.size() < 2)
+        return;
+    const float stripWidth = wayWidth * (band.end - band.start);
+    const int across = std::clamp(static_cast<int>(std::ceil(stripWidth / 1.5f)), 2, 24);
+    const int rowSize = across + 1;
+    const size_t maxRows = static_cast<size_t>(16000 / rowSize);
+    for (size_t first = 0; first + 1 < points.size(); )
+    {
+        const size_t last = std::min(first + maxRows, points.size());
+        const int rows = static_cast<int>(last - first);
+        auto mesh = std::make_unique<Shape>();
+        mesh->Reserve(rows * rowSize);
+        mesh->ReserveFaces((rows - 1) * across * 2);
+        mesh->RegisterTexture(texture, 1.f);
+        Poly poly;
+        poly.Init();
+        poly.SetTexture(texture);
+        int flags = NoClamp | NoZWrite;
+        if (texture->GetAlphaClass() == AlphaStats::Blend ||
+            (band.appearance.special & (IsAlpha | IsTransparent)) != 0)
+            flags |= IsAlpha;
+        poly.SetSpecial(flags);
+        for (size_t i = first; i < last; ++i)
+        {
+            const Vector3 before = i == 0 ? WayPerpendicular(points[0], points[1])
+                : WayPerpendicular(points[i - 1], points[i]);
+            const Vector3 after = i + 1 == points.size() ? before
+                : WayPerpendicular(points[i], points[i + 1]);
+            Vector3 perp = before + after;
+            const float norm = std::sqrt(perp.SquareSizeXZ());
+            if (norm > 1e-4f)
+                perp *= 1.f / norm;
+            else
+                perp = after;
+            const float dot = std::fabs(perp.X() * after.X() + perp.Z() * after.Z());
+            const float halfWidth = wayWidth * 0.5f / floatMax(dot, 0.4f);
+            for (int k = 0; k <= across; ++k)
+            {
+                const float t = static_cast<float>(k) / across;
+                const float u = band.start + (band.end - band.start) * t;
+                Vector3 pos = points[i] + perp * (halfWidth * (1.f - 2.f * u));
+                float dx = 0.f, dz = 0.f;
+                pos[1] = land->SurfaceY(pos.X(), pos.Z(), &dx, &dz) +
+                    RoadWaySurfaceOffset + 0.006f;
+                Vector3 normal(-dx, 1, -dz);
+                normal.Normalize();
+                const float donorX = band.appearance.xMin +
+                    (band.appearance.xMax - band.appearance.xMin) * t;
+                const float donorZ = band.appearance.zMin + uvDistance[i];
+                const float uu = band.appearance.uC + band.appearance.uX * donorX +
+                    band.appearance.uZ * donorZ;
+                const float vv = band.appearance.vC + band.appearance.vX * donorX +
+                    band.appearance.vZ * donorZ;
+                mesh->AddVertexFast(pos, normal, ClipAll,
+                                    texture->UToPhysical(uu), texture->VToPhysical(vv));
+            }
+            if (i > first)
+                for (int k = 0; k < across; ++k)
+                {
+                    const int prev = static_cast<int>(i - first - 1) * rowSize + k;
+                    const int next = static_cast<int>(i - first) * rowSize + k;
+                    poly.SetN(3);
+                    poly.Set(0, prev); poly.Set(1, next); poly.Set(2, prev + 1);
+                    mesh->AddFace(poly);
+                    poly.Set(0, prev + 1); poly.Set(1, next); poly.Set(2, next + 1);
+                    mesh->AddFace(poly);
+                }
+        }
+        mesh->CalculateMinMax();
+        mesh->FindSections(true);
+        meshes.push_back(std::move(mesh));
+        first = last - 1;
+    }
+}
 } // namespace
 
 void RoadNet::LoadWays(Landscape* land)
@@ -760,6 +842,9 @@ void RoadNet::LoadWays(Landscape* land)
             _wayMeshes.push_back(std::move(mesh));
             first = last - 1; // overlap one row for continuous sections
         }
+
+        for (const RoadDonorBand& band : bands)
+            AppendDonorBandMeshes(_wayMeshes, land, points, uvDistance, way.width, band);
 
         for (size_t i = 1; i < points.size(); ++i)
         {
