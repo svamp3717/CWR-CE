@@ -272,6 +272,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Graphics/Rendering/test_colors_materials.cpp
 
     # World tests (batch-08)
+    World/test_road_ways.cpp
     World/test_terrain.cpp
     World/test_collision_nonfinite.cpp
     World/test_object_animated_bounds.cpp
