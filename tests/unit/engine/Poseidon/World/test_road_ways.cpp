@@ -57,3 +57,41 @@ TEST_CASE("Way road contacts retain the donor roadway material", "[World][RoadWa
     REQUIRE(road.IsInside(Vector3(20, -2, 6), 0.f));
     REQUIRE_FALSE(road.IsInside(Vector3(20, -2, 10), 0.f));
 }
+
+TEST_CASE("Way route strategic sampling keeps actual road bends", "[World][RoadWays][AI]")
+{
+    RoadPathArray route;
+    route.Add(Vector3(0, 0, 0));
+    route.Add(Vector3(10, 0, 0));
+    route.Add(Vector3(20, 0, 0));
+    route.Add(Vector3(20, 0, 10));
+    route.Add(Vector3(20, 0, 20));
+    route.Add(Vector3(20, 0, 30));
+
+    std::vector<Vector3> goals;
+    RoadNet::SampleWayRoute(route, goals);
+    REQUIRE(goals.size() >= 3);
+    REQUIRE(goals.front().X() == Catch::Approx(0));
+    REQUIRE(goals.back().X() == Catch::Approx(20));
+    REQUIRE(goals.back().Z() == Catch::Approx(30));
+
+    bool retainedTurn = false;
+    for (const Vector3& point : goals)
+        if (point.X() == Catch::Approx(20) && point.Z() == Catch::Approx(0))
+            retainedTurn = true;
+    REQUIRE(retainedTurn); // not a straight line from start to destination
+}
+
+TEST_CASE("Way route sampling reduces links on a straight road", "[World][RoadWays][AI]")
+{
+    RoadPathArray route;
+    for (int i = 0; i <= 100; ++i)
+        route.Add(Vector3(i * 2.f, 0, 0));
+
+    std::vector<Vector3> goals;
+    RoadNet::SampleWayRoute(route, goals);
+    REQUIRE(goals.size() < static_cast<size_t>(route.Size()));
+    REQUIRE(goals.size() > 5);
+    REQUIRE(goals.front().X() == Catch::Approx(0));
+    REQUIRE(goals.back().X() == Catch::Approx(200));
+}
