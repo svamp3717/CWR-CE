@@ -138,8 +138,15 @@ void Landscape::RefreshWayTerrain()
 void Landscape::InitGeography()
 {
     _roadWayGeometryDirty = false;
-    GRoadNet = new RoadNet;
-    GRoadNet->Build(this);
+    // Editor preview can invoke InitGeography again on the same world while
+    // AI is already present. Replacing RoadNet would invalidate its RoadLink
+    // pointers during mission start. Reuse the graph when the world has not
+    // changed, while still regenerating geography when requested.
+    if (!GRoadNet || !GRoadNet->IsBuiltFor(this))
+    {
+        GRoadNet = new RoadNet;
+        GRoadNet->Build(this);
+    }
 
     // check if randomization etc. is valid
     if (_mountains.Size() > 0)
