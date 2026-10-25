@@ -129,7 +129,7 @@ void Landscape::StampWayGeography()
 void Landscape::RefreshWayTerrain()
 {
     _roadWayGeometryDirty = false;
-    if (this != GLandscape || !GRoadNet || !GRoadNet->HasWays())
+    if (!GRoadNet || !GRoadNet->HasWays())
         return;
     GRoadNet->Build(this);
     StampWayGeography();
