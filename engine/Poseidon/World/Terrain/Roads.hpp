@@ -14,7 +14,7 @@ namespace Poseidon
 {
 // Lift the ribbon above the underlying terrain to avoid z-fighting.
 // Ground collision and road surface queries use the same height.
-constexpr float RoadWaySurfaceOffset = 0.18f;
+constexpr float RoadWaySurfaceOffset = 0.075f;
 
 class RoadLink
 {
