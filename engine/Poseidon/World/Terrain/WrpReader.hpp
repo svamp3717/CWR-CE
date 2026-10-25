@@ -14,6 +14,7 @@ struct WrpObjectInfo
 {
     int id;
     RStringB name;
+    int nameIndex = -1; // OPRW name-table index, for model reuse during loading
     Vector3 position;
     float heading; // only meaningful for RVW v2
     Matrix4 transform;

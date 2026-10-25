@@ -7,14 +7,24 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
 #include <Poseidon/Foundation/Containers/Array2D.hpp>
+#include <memory>
+#include <vector>
 
 namespace Poseidon
 {
 class RoadLink
 {
+	// Most road segments have at most four endpoints. Additional connections
+	// (e.g. complex junctions) use overflow storage only when needed.
 	enum {NCon=4};
+	struct ExtraConnections
+	{
+		std::vector<Vector3> pos;
+		std::vector<RoadLink *> con;
+	};
 	Vector3 _pos[NCon];
 	RoadLink *_con[NCon];
+	std::unique_ptr<ExtraConnections> _extra;
 	int _nCon;
 
 	int _locks;
@@ -25,9 +35,13 @@ class RoadLink
 	~RoadLink(){}
 
 	__forceinline int NConnections() const {return _nCon;}
-	__forceinline const Vector3 *PosConnections() const {return _pos;}
-	__forceinline RoadLink * const *Connections() const {return _con;}
-	__forceinline void SetConnection( int i, RoadLink *con ){_con[i]=con;}
+	__forceinline const Vector3 *PosConnections() const {return _extra ? _extra->pos.data() : _pos;}
+	__forceinline RoadLink * const *Connections() const {return _extra ? _extra->con.data() : _con;}
+	__forceinline void SetConnection( int i, RoadLink *con )
+	{
+		if (_extra) _extra->con[i] = con;
+		else _con[i] = con;
+	}
 
 	void AddConnection( Vector3Par pos, RoadLink *con );
 	Vector3 GetCenter() const;

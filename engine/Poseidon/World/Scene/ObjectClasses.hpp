@@ -150,7 +150,9 @@ class Road: public Object
 	InitPtr<RoadType> _roadType;
 
 	public:
-	Road( LODShapeWithShadow *shape, int id );
+	// An imported WRP can supply an already-resolved road type.
+	// Ordinary road creation retains the original bank lookup.
+	Road( LODShapeWithShadow *shape, int id, RoadType *cachedRoadType = nullptr );
 
 	bool IsAnimated( int level ) const override; // appearence changed with Animate
 	bool IsAnimatedShadow( int level ) const override; // shadow changed with Animate

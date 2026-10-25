@@ -426,6 +426,7 @@ WrpReader::ObjectReadResult WrpReader::ReadNextOPRWObject(QIStream& f, WrpObject
     }
 
     info.id = id;
+    info.nameIndex = nameIndex;
     info.name = _objectNames[nameIndex];
     info.transform = trans;
     info.position = Vector3(trans.Position().X(), trans.Position().Y(), trans.Position().Z());

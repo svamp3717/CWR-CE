@@ -26,9 +26,13 @@
 #include <Poseidon/World/Terrain/WrpReader.hpp>
 #include <Poseidon/IO/Serialization/SerializeBinExt.hpp>
 #include <Poseidon/World/Terrain/TerrainProfile.hpp>
+#include <Poseidon/World/Terrain/WrpObjectProfile.hpp>
 
 #include <time.h>
 #include <string>
+#include <string_view>
+#include <deque>
+#include <unordered_map>
 #include <cstdio>
 #include <stdint.h>
 #include <string.h>
@@ -55,6 +59,55 @@
 
 namespace Poseidon
 {
+struct WrpCachedModel
+{
+    Ref<LODShapeWithShadow> shape;
+    EntityType* entityType = nullptr;
+    RoadType* roadType = nullptr;
+};
+
+// RoadTypes.New uses BankArray::Find, which linearly scans all known road
+// models. Resolving it for every one of ~800,000 road placements cost over
+// two minutes on a large RVW world. Resolve once per unique loaded model.
+static RoadType* ResolveWrpRoadType(LODShapeWithShadow* shape)
+{
+    static const RStringB roadClass("road");
+    return shape->GetPropertyClass() == roadClass ? RoadTypes.New(shape->Name()) : nullptr;
+}
+
+// Timings are extrapolated from one in 128 placements, so they must not be
+// mistaken for actual wall-clock load times (logged separately below).
+static void LogWrpObjectProfile(const char* format, const WrpObjectProfile& p, int total)
+{
+    if (!p.samples)
+    {
+        LOG_INFO(World, "WRP {} sampled profile: no samples ({} objects)", format, total);
+        return;
+    }
+    LOG_INFO(World, "WRP {} sampled profile: {} / {} objects, one in {}", format, p.samples, total,
+             WrpObjectProfile::SamplePeriod);
+    LOG_INFO(World,
+             "WRP {} estimated stage ms: constructors {:.1f}, IDs {:.1f}, matrix repair {:.1f}, "
+             "SetTransform {:.1f}", format, p.EstimatedMs(WrpObjectProfile::Factory, total),
+             p.EstimatedMs(WrpObjectProfile::IDCache, total),
+             p.EstimatedMs(WrpObjectProfile::MatrixRepair, total),
+             p.EstimatedMs(WrpObjectProfile::SetTransform, total));
+    LOG_INFO(World,
+             "WRP {} estimated stage ms: ground position {:.1f}, SurfaceY {:.1f}, cell insert {:.1f}, "
+             "OPRW conflict IDs {:.1f}", format, p.EstimatedMs(WrpObjectProfile::GroundPosition, total),
+             p.EstimatedMs(WrpObjectProfile::SurfaceHeight, total),
+             p.EstimatedMs(WrpObjectProfile::CellInsertion, total),
+             p.EstimatedMs(WrpObjectProfile::OprwIDConflicts, total));
+    LOG_INFO(World,
+             "WRP {} factory avg us (samples): forest {:.2f} ({}), road {:.2f} ({}), "
+             "streetlamp {:.2f} ({}), building {:.2f} ({}), other {:.2f} ({})",
+             format, p.AverageFactoryUs(WrpObjectProfile::Forest), p.factorySamples[WrpObjectProfile::Forest],
+             p.AverageFactoryUs(WrpObjectProfile::Road), p.factorySamples[WrpObjectProfile::Road],
+             p.AverageFactoryUs(WrpObjectProfile::StreetLamp), p.factorySamples[WrpObjectProfile::StreetLamp],
+             p.AverageFactoryUs(WrpObjectProfile::Building), p.factorySamples[WrpObjectProfile::Building],
+             p.AverageFactoryUs(WrpObjectProfile::Other), p.factorySamples[WrpObjectProfile::Other]);
+}
+
 LSError Landscape::LoadData(QIStream& f, float landGrid)
 {
     ProgressReset();
@@ -166,9 +219,31 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
     }
 
     const DWORD objectsStarted = Poseidon::Foundation::GlobalTickCount();
+    WrpObjectProfile objectProfile;
     const int maxID = 65536;
     bool isID[maxID];
     memset(isID, 0, sizeof(isID));
+
+    // Cache RVW3/RVW4 model shapes for the duration of the import. Keep
+    // stable owning strings in a deque so an unordered_map<string_view> can
+    // perform allocation-free O(1) average lookups in C++17.
+    std::deque<std::string> shapeNames;
+    std::unordered_map<std::string_view, WrpCachedModel> shapeCache;
+    int uniqueRoadModels = 0;
+    auto resolveShape = [&](const char* name) -> const WrpCachedModel&
+    {
+        const auto existing = shapeCache.find(std::string_view(name));
+        if (existing != shapeCache.end())
+            return existing->second;
+        WrpCachedModel model;
+        model.shape = Shapes.New(name, false, true);
+        model.entityType = FindWorldObjectEntityType(model.shape);
+        model.roadType = ResolveWrpRoadType(model.shape);
+        if (model.roadType)
+            ++uniqueRoadModels;
+        shapeNames.emplace_back(name);
+        return shapeCache.emplace(std::string_view(shapeNames.back()), std::move(model)).first->second;
+    };
 
     // load all objects
     // bool someForest=false;
@@ -204,12 +279,16 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
             {
                 break;
             }
+            so.name[sizeof(so.name) - 1] = 0;
             if (!*so.name)
             {
                 break; // object list terminated
             }
             int id = NewObjectID();
-            ObjectCreate(id, so.name, ConvertToM(so.matrix), nullptr, nullptr, true);
+            const WrpCachedModel& model = resolveShape(so.name);
+            WrpObjectProfile* sample = (countObjects % WrpObjectProfile::SamplePeriod == 0) ? &objectProfile : nullptr;
+            ObjectCreate(id, model.shape, ConvertToM(so.matrix), nullptr, nullptr, true, model.entityType, true,
+                         sample, model.roadType);
         }
         else
         {
@@ -219,6 +298,7 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
             {
                 break;
             }
+            so.name[sizeof(so.name) - 1] = 0;
             if (!*so.name)
             {
                 break; // object list terminated
@@ -242,7 +322,10 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
                 isID[so.id] = true;
             }
             PoseidonAssert(so.id >= 0);
-            ObjectCreate(so.id, so.name, ConvertToM(so.matrix), nullptr, nullptr, true);
+            const WrpCachedModel& model = resolveShape(so.name);
+            WrpObjectProfile* sample = (countObjects % WrpObjectProfile::SamplePeriod == 0) ? &objectProfile : nullptr;
+            ObjectCreate(so.id, model.shape, ConvertToM(so.matrix), nullptr, nullptr, true, model.entityType, true,
+                         sample, model.roadType);
         }
 
         // A very large WRP can have millions of objects. Updating the UI for
@@ -254,6 +337,10 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
         }
     }
     LOG_DEBUG(World, "Total {} objects, max. id {}", countObjects, maxObjID);
+    LOG_INFO(World, "WRP RVW: {} distinct model shapes, {} cached road models", shapeCache.size(), uniqueRoadModels);
+    LOG_INFO(World, "WRP RVW: object ID cache {} slots, approx {} MiB", _objectIds.Size(),
+             static_cast<double>(_objectIds.Size()) * sizeof(_objectIds[0]) / (1024.0 * 1024.0));
+    LogWrpObjectProfile("RVW", objectProfile, countObjects);
 
     ProgressFrame();
 
@@ -1654,11 +1741,26 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
 
     ProgressRefresh();
 
+    // OPRW uses an indexed model-name table. Resolve each shape on its first
+    // instance and keep it alive for the remainder of the import instead of
+    // repeating Shapes.New (and dev-mode asset requests) for every placement.
+    // Huge islands can contain millions of objects but few unique P3D names.
+    AutoArray<Ref<LODShapeWithShadow>> shapeCache;
+    shapeCache.Resize(reader.GetObjectNameCount());
+    AutoArray<EntityType*> typeCache;
+    typeCache.Resize(reader.GetObjectNameCount());
+    AutoArray<RoadType*> roadTypeCache;
+    roadTypeCache.Resize(reader.GetObjectNameCount());
+    int uniqueShapesLoaded = 0;
+    int uniqueRoadModels = 0;
+
     // The reader leaves the stream at the first OPRW object. Construct objects
     // directly instead of retaining another enormous AutoArray<WrpObjectInfo>.
     AutoArray<InitPtr<Object>> idCache;
     AutoArray<AutoArray<InitPtr<Object>>> conflicts;
     int objectsLoaded = 0;
+    int duplicateIDs = 0;
+    WrpObjectProfile objectProfile;
     const DWORD objectsStarted = Poseidon::Foundation::GlobalTickCount();
 
     for (;;)
@@ -1673,15 +1775,30 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
             ProgressFinish();
             return false;
         }
+        // ReadNextOPRWObject already validated this index against the name table.
+        Ref<LODShapeWithShadow>& shape = shapeCache[obj.nameIndex];
+        if (!shape)
+        {
 #if _ENABLE_CHEATS
-        GFileServer->Request(obj.name, 1.0f);
+            GFileServer->Request(obj.name, 1.0f);
 #endif
+            shape = Shapes.New(obj.name, false, true);
+            typeCache[obj.nameIndex] = FindWorldObjectEntityType(shape);
+            roadTypeCache[obj.nameIndex] = ResolveWrpRoadType(shape);
+            if (roadTypeCache[obj.nameIndex])
+                ++uniqueRoadModels;
+            ++uniqueShapesLoaded;
+        }
         int x, z;
-        Object* o = ObjectCreate(obj.id, obj.name, obj.transform, &x, &z, true);
+        WrpObjectProfile* sample = (objectsLoaded % WrpObjectProfile::SamplePeriod == 0) ? &objectProfile : nullptr;
+        Object* o = ObjectCreate(obj.id, shape, obj.transform, &x, &z, true, typeCache[obj.nameIndex], true,
+                                 sample, roadTypeCache[obj.nameIndex]);
 
+        const auto idStarted = sample ? WrpObjectProfile::Clock::now() : WrpObjectProfile::TimePoint{};
         idCache.Access(obj.id);
         if (idCache[obj.id])
         {
+            ++duplicateIDs;
             conflicts.Access(obj.id);
             conflicts[obj.id].Add(o);
         }
@@ -1689,6 +1806,8 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
         {
             idCache[obj.id] = o;
         }
+        if (sample)
+            sample->Record(WrpObjectProfile::OprwIDConflicts, idStarted, WrpObjectProfile::Clock::now());
 
         // Throttle progress updates for multi-million-object terrains.
         if ((++objectsLoaded & 1023) == 0)
@@ -1715,6 +1834,15 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     const DWORD objectsFinished = Poseidon::Foundation::GlobalTickCount();
     LOG_INFO(World, "WRP OPRW: decode {} ms, terrain {} ms", parsedAt - wrpStarted, objectsStarted - parsedAt);
     LOG_INFO(World, "WRP OPRW: objects {} ms, total objects {}", objectsFinished - objectsStarted, objectsLoaded);
+    LOG_INFO(World, "WRP OPRW: unique shapes {} / {} indexed names, {} cached road models",
+             uniqueShapesLoaded, reader.GetObjectNameCount(), uniqueRoadModels);
+    LOG_INFO(World, "WRP OPRW: ID slots primary {}, conflict {}, temporary {}, duplicate IDs {}", _objectIds.Size(),
+             conflicts.Size(), idCache.Size(), duplicateIDs);
+    LOG_INFO(World, "WRP OPRW: ID table storage approx {:.1f} MiB (excludes objects and excess capacity)",
+             (static_cast<double>(_objectIds.Size()) * sizeof(_objectIds[0]) +
+              static_cast<double>(idCache.Size()) * sizeof(idCache[0]) +
+              static_cast<double>(conflicts.Size()) * sizeof(conflicts[0])) / (1024.0 * 1024.0));
+    LogWrpObjectProfile("OPRW", objectProfile, objectsLoaded);
     ProgressFinish();
     return true;
 }

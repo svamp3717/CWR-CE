@@ -273,6 +273,8 @@ list(APPEND POSEIDON_TEST_SOURCES
 
     # World tests (batch-08)
     World/test_terrain.cpp
+    World/test_road_links.cpp
+    World/test_wrp_object_profile.cpp
     World/test_collision_nonfinite.cpp
     World/test_object_animated_bounds.cpp
     World/test_landscape_object_ids.cpp

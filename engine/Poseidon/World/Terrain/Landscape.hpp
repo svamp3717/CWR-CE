@@ -6,7 +6,7 @@
 #include <Poseidon/Foundation/Containers/BankArray.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 
-namespace Poseidon { class TaskPool; }
+namespace Poseidon { class TaskPool; class RoadType; struct WrpObjectProfile; }
 namespace Poseidon
 {
 using Poseidon::TaskPool;
@@ -657,6 +657,15 @@ class Landscape: public SerializeClass
 		int id, const char *shape, const Matrix4 &transform,
 		int *x=nullptr, int *z=nullptr, bool avoidRecalculation = false
 	);
+	// The indexed OPRW loader resolves model shapes once per name-table entry.
+	// Reuse those shapes rather than performing a Shapes.New lookup per instance.
+	Object *ObjectCreate
+	(
+		int id, LODShapeWithShadow *shape, const Matrix4 &transform,
+		int *x=nullptr, int *z=nullptr, bool avoidRecalculation = false,
+		EntityType *cachedType = nullptr, bool typeResolved = false,
+		WrpObjectProfile *profile = nullptr, RoadType *cachedRoadType = nullptr
+	);
 	void ObjectDestroy( int id );
 	void ObjectMove( int id, const Matrix4 &transform );
 	void ObjectTypeChange( int id, const char *shape );
@@ -999,6 +1008,11 @@ extern Landscape *GLandscape; // global single storage (see Landscape.cpp)
 
 void ClearShapes(); // flush all cached shapes, types ...
 
+// Resolve costly vehicle-type bank lookups once for each unique WRP model.
+EntityType *FindWorldObjectEntityType(LODShapeWithShadow *shape);
 Object *NewObject( LODShapeWithShadow *shape, int id );
+Object *NewObject( LODShapeWithShadow *shape, int id, EntityType *cachedType, bool typeResolved );
+Object *NewObject( LODShapeWithShadow *shape, int id, EntityType *cachedType, bool typeResolved,
+                   RoadType *cachedRoadType );
 } // namespace Poseidon
 

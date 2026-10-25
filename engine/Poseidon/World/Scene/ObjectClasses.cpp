@@ -737,9 +737,11 @@ RoadType::~RoadType() = default;
 DEFINE_FAST_ALLOCATOR(Road)
 DEFINE_CASTING(Road)
 
-Road::Road(LODShapeWithShadow* shape, int id) : Object(shape, id)
+Road::Road(LODShapeWithShadow* shape, int id, RoadType* cachedRoadType) : Object(shape, id)
 {
-    _roadType = RoadTypes.New(shape->Name());
+    // BankArray::New performs a linear name scan. The WRP loader resolves
+    // the shared RoadType once per distinct model rather than on every road.
+    _roadType = cachedRoadType ? cachedRoadType : RoadTypes.New(shape->Name());
     SetType(Network);
     if (shape->GeometryLevel())
     {
@@ -798,14 +800,41 @@ DEF_RSB(house);
 DEF_RSB(vehicle);
 DEF_RSB(church);
 
+EntityType* FindWorldObjectEntityType(LODShapeWithShadow* shape)
+{
+    const RStringB& className = shape->GetPropertyClass();
+    if (className == RSB(forest))
+        return VehicleTypes.FindShape(shape->Name());
+
+    if (className == RSB(streetlamp) || className == RSB(house) || className == RSB(vehicle) ||
+        className == RSB(church))
+    {
+        EntityType* type = VehicleTypes.FindShapeAndSimulation(shape->Name(), className);
+        return type ? type : VehicleTypes.FindShape(shape->Name());
+    }
+    return nullptr;
+}
+
 Object* NewObject(LODShapeWithShadow* shape, int id)
+{
+    return NewObject(shape, id, nullptr, false);
+}
+
+Object* NewObject(LODShapeWithShadow* shape, int id, EntityType* cachedType, bool typeResolved)
+{
+    return NewObject(shape, id, cachedType, typeResolved, nullptr);
+}
+
+Object* NewObject(LODShapeWithShadow* shape, int id, EntityType* cachedType, bool typeResolved,
+                  RoadType* cachedRoadType)
 {
     const RStringB& className = shape->GetPropertyClass();
     if (className.GetLength() > 0)
     {
         if (className == RSB(forest))
         {
-            BuildingType* type = dynamic_cast<BuildingType*>(VehicleTypes.FindShape(shape->Name()));
+            EntityType* entityType = typeResolved ? cachedType : FindWorldObjectEntityType(shape);
+            BuildingType* type = dynamic_cast<BuildingType*>(entityType);
             if (type)
             {
                 type->VehicleAddRef();
@@ -818,16 +847,12 @@ Object* NewObject(LODShapeWithShadow* shape, int id)
         }
         else if (className == RSB(road))
         {
-            return new Road(shape, id);
+            return new Road(shape, id, cachedRoadType);
         }
         else if (className == RSB(streetlamp))
         {
             // EntityType *vehType = VehicleTypes.New("StreetLamp");
-            EntityType* vehType = VehicleTypes.FindShapeAndSimulation(shape->Name(), className);
-            if (!vehType)
-            {
-                vehType = VehicleTypes.FindShape(shape->Name());
-            }
+            EntityType* vehType = typeResolved ? cachedType : FindWorldObjectEntityType(shape);
             if (!vehType)
             {
                 LOG_DEBUG(Graphics, "{}: {}, config class missing", shape->Name(), (const char*)className);
@@ -845,12 +870,7 @@ Object* NewObject(LODShapeWithShadow* shape, int id)
         {
             // search vehicle type bank for given shape
             // prefer type with the same simulation
-            EntityType* vType = VehicleTypes.FindShapeAndSimulation(shape->Name(), className);
-            if (!vType)
-            {
-                // if not found, resort to any type with this shape
-                vType = VehicleTypes.FindShape(shape->Name());
-            }
+            EntityType* vType = typeResolved ? cachedType : FindWorldObjectEntityType(shape);
             if (!vType)
             {
                 // it is not in config: ignore it

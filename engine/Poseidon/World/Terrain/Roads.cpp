@@ -7,6 +7,7 @@
 #include <Poseidon/Foundation/Containers/Array2D.hpp>
 #include <Poseidon/Foundation/Containers/StreamArray.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
+#include <Poseidon/Foundation/Framework/AppFrame.hpp>
 #include <Poseidon/Foundation/Math/MathOpt.hpp>
 #include <Poseidon/Foundation/Memory/MemAlloc.hpp>
 
@@ -98,6 +99,7 @@ RoadNet::~RoadNet() = default;
 void RoadNet::Scan(Landscape* land)
 {
     _roads.Dim(LandRange, LandRange);
+    int roadLinks = 0;
     // insert all road objects into the road list
     int x, z;
     for (x = 0; x < LandRange; x++)
@@ -184,17 +186,20 @@ void RoadNet::Scan(Landscape* land)
                 // insert into corresponding square
                 RoadList& list = SelectRoadList(avg.X(), avg.Z());
                 list.Add(elem);
+                ++roadLinks;
             }
         }
     }
+    LOG_INFO(World, "WRP roads: scanned {} road links", roadLinks);
 }
 
 Vector3 RoadLink::GetCenter() const
 {
     Vector3 center = VZero;
+    const Vector3* pos = PosConnections();
     for (int i = 0; i < _nCon; i++)
     {
-        center += _pos[i];
+        center += pos[i];
     }
     center *= 1.0 / _nCon;
 
@@ -204,9 +209,10 @@ Vector3 RoadLink::GetCenter() const
 float RoadLink::NearestConnectionDist2(Vector3Val pos) const
 {
     float dist2Min = 1e10;
+    const Vector3* connections = PosConnections();
     for (int i = 0; i < _nCon; i++)
     {
-        float dist2 = (_pos[i] - pos).SquareSizeXZ();
+        float dist2 = (connections[i] - pos).SquareSizeXZ();
         if (dist2 < dist2Min)
         {
             dist2Min = dist2;
@@ -219,14 +225,32 @@ float RoadLink::NearestConnectionDist2(Vector3Val pos) const
 
 void RoadLink::AddConnection(Vector3Par pos, RoadLink* con)
 {
-    if (_nCon >= NCon)
+    if (_nCon < NCon)
     {
-        Fail("No more slot to add connection");
-        return;
+        _con[_nCon] = con;
+        _pos[_nCon] = pos;
     }
-    _con[_nCon] = con;
-    _pos[_nCon] = pos;
-    _nCon++;
+    else
+    {
+        if (!_extra)
+        {
+            // The four inline endpoints are enough for most road segments.
+            // Preserve all existing links when a complex intersection needs
+            // additional connections; the old fixed limit silently broke
+            // the reverse link and logged "No more slot to add connection".
+            _extra = std::make_unique<ExtraConnections>();
+            _extra->pos.reserve(NCon * 2);
+            _extra->con.reserve(NCon * 2);
+            for (int i = 0; i < _nCon; ++i)
+            {
+                _extra->pos.push_back(_pos[i]);
+                _extra->con.push_back(_con[i]);
+            }
+        }
+        _extra->pos.push_back(pos);
+        _extra->con.push_back(con);
+    }
+    ++_nCon;
 }
 
 static bool IsConnected(const RoadLink* tItem, const RoadLink* item, int maxDepth)
@@ -254,6 +278,7 @@ static bool IsConnected(const RoadLink* tItem, const RoadLink* item, int maxDept
 #define DIAG_COUNT 0
 void RoadNet::Connect()
 {
+    const DWORD pass1Started = Foundation::GlobalTickCount();
 #if DIAG_COUNT
     int count[4];
     memset(count, 0, sizeof(count));
@@ -335,6 +360,7 @@ void RoadNet::Connect()
     }
 #endif
     // second pass: try to connect road unconnected points to something
+    const DWORD pass1Finished = Foundation::GlobalTickCount();
 
     const float maxDistConPass2 = 7.0;
     for (int x = 0; x < LandRange; x++)
@@ -450,6 +476,8 @@ void RoadNet::Connect()
             } // for(i)
         } // for(x,z)
     }
+    LOG_INFO(World, "WRP roads connect: direct {} ms, nearby repair {} ms",
+             pass1Finished - pass1Started, Foundation::GlobalTickCount() - pass1Finished);
 }
 
 void RoadNet::Optimize()
@@ -849,10 +877,18 @@ bool RoadNet::IsLocked(Vector3Par pos, float size) const
 
 void RoadNet::Build(Landscape* land)
 {
+    const DWORD started = Foundation::GlobalTickCount();
     Scan(land);
+    const DWORD scanned = Foundation::GlobalTickCount();
     Connect();
+    const DWORD connected = Foundation::GlobalTickCount();
     Optimize();
+    const DWORD optimized = Foundation::GlobalTickCount();
     Compact();
+    const DWORD finished = Foundation::GlobalTickCount();
+
+    LOG_INFO(World, "WRP roads: scan {} ms, connect {} ms, optimize {} ms, compact {} ms, total {} ms",
+             scanned - started, connected - scanned, optimized - connected, finished - optimized, finished - started);
 }
 
 SRef<RoadNet> GRoadNet; // global instance
