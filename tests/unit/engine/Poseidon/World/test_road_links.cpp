@@ -37,6 +37,11 @@ TEST_CASE("Road junction grows beyond four connections without losing links", "[
     junction.SetConnection(1, &neighbour);
     CHECK(junction.Connections()[1] == &neighbour);
     CHECK(junction.PosConnections()[1].X() == 1.0f);
+
+    // Geometry queries must see every expanded position, not just the four
+    // original inline slots (otherwise they read past the inline array).
+    CHECK(junction.GetCenter().X() == 9.5f);
+    CHECK(junction.NearestConnectionDist2(Vector3(19, 0, 0)) == 0.0f);
 }
 
 TEST_CASE("Ordinary road segments stay within inline connection storage", "[World][Roads]")
