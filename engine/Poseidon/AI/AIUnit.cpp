@@ -27,6 +27,7 @@
 #include <Poseidon/Foundation/Time/Time.hpp>
 #include <cmath>
 #include <utility>
+#include <vector>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Containers/StaticArray.hpp>
@@ -2265,6 +2266,62 @@ bool AIUnit::CreateRoadPath(Vector3Val from, Vector3Val to)
     RoadPathArray roadPath; // StaticArray
     static StaticStorage<Vector3> vectorStorage;
     roadPath.SetStorage(vectorStorage.Init(128));
+
+    // Generated ways are a centerline graph. The legacy SearchPath call
+    // allows the driver's physical position/waypoint to be several metres
+    // to one side and can then fail (or choose an unrelated nearby road),
+    // silently falling back to terrain A*. For an explicitly procedural
+    // strategic route, project entry/exit onto the SAME way graph and
+    // retain every routed connection as an operative steering point.
+    if (_planner && _planner->IsUsingWayRoute() && GRoadNet->HasWays())
+    {
+        Vector3 entry, exit;
+        if (GRoadNet->GetNearestWayPoint(from, 12.f, entry) &&
+            GRoadNet->GetNearestWayPoint(to, 35.f, exit) &&
+            (entry - exit).SquareSizeXZ() > Square(3.f))
+        {
+            roadPath.Clear();
+            if (GRoadNet->SearchPath(entry, exit, roadPath, 1.f) && roadPath.Size() >= 2)
+            {
+                std::vector<Vector3> drive;
+                drive.reserve(static_cast<size_t>(roadPath.Size()) + 4);
+                auto appendPoint = [&drive](Vector3Val p)
+                {
+                    if (drive.empty() || (drive.back() - p).SquareSizeXZ() > Square(0.2f))
+                        drive.push_back(p);
+                };
+                appendPoint(from);
+                appendPoint(entry);
+                for (int i = 0; i < roadPath.Size(); ++i)
+                    appendPoint(roadPath[i]);
+                appendPoint(exit);
+                appendPoint(to);
+                if (drive.size() >= 2)
+                {
+                    veh->PerformLock();
+                    _path.Resize(static_cast<int>(drive.size()));
+                    int maxIndex = -1;
+                    for (int i = 0; i < static_cast<int>(drive.size()); ++i)
+                    {
+                        Vector3 p = GLandscape->PointOnSurface(drive[i].X(), combatHeight, drive[i].Z());
+                        _path[i]._pos = p;
+                        _path[i]._cost = 0.f;
+                        if (maxIndex < 0 && i > 1 &&
+                            (p - from).SquareSizeXZ() >= Square(DIST_MAX_OPER))
+                            maxIndex = i;
+                    }
+                    veh->FillPathCost(_path);
+                    _path.SetOperIndex(1);
+                    _path.SetMaxIndex(maxIndex < 0 || _lastPlan
+                        ? _path.Size() : maxIndex);
+                    _path.SetOnRoad(true);
+                    return true;
+                }
+            }
+            LOG_DEBUG(AI, "{}: local procedural road path failed ({:.1f},{:.1f}) to ({:.1f},{:.1f})",
+                      (const char*)GetDebugName(), entry.X(), entry.Z(), exit.X(), exit.Z());
+        }
+    }
 
     if (!GRoadNet->SearchPath(from, to, roadPath, 1.25 * precision))
     {
