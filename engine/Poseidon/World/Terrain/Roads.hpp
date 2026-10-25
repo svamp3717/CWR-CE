@@ -8,6 +8,7 @@
 
 #include <Poseidon/Foundation/Containers/Array2D.hpp>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace Poseidon
@@ -126,6 +127,8 @@ class RoadNet: public RefCount
 	Array2D<RoadList> _roads;
 	std::vector<RoadWaySegment> _waySegments;
 	std::vector<RoadWayMapSegment> _wayMapSegments;
+	const Landscape *_builtForLandscape = nullptr;
+	std::string _builtForName;
 	std::vector<std::unique_ptr<Shape>> _wayMeshes;
 	//BIG_ARRAY<RoadList,LandRange,LandRange> _roads; // all roads
 
@@ -143,6 +146,7 @@ class RoadNet: public RefCount
 	void Compact(); // optimize memory picture
 
 	void Build( Landscape *land ); // all steps together
+	bool IsBuiltFor(const Landscape *land) const;
 	void RefreshWayHeights(Landscape *land); // update meshes in place, preserve AI road links
 
 	bool HasWays() const {return !_waySegments.empty();}
