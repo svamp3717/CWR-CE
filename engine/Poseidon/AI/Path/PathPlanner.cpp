@@ -614,6 +614,90 @@ bool AIPathPlanner::StartSearching(AI::ThinkImportance prec, VehicleWithAI* veh,
 #endif
 
     AI_ERROR(!_searching);
+
+    // Keep the centreline of the actual road graph as the strategic plan.
+    // The old procedural shortcut returned a successful graph search, then
+    // stored ONLY the start and finish: all turns were discarded and the
+    // operative driver cut straight across fields to the waypoint.
+    //
+    // Resolve this before the LevelCommands / short-distance early exit:
+    // editor Move waypoints commonly enter via that branch too.
+    const bool groundVehicle = veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeCar)) ||
+        veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeAPC)) ||
+        veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeTank));
+    if (groundVehicle && !veh->IsCautious() && GRoadNet && GRoadNet->HasWays() &&
+        GRoadNet->IsOnRoad(ptStart, 8.f) && GRoadNet->IsOnRoad(ptEnd, 8.f))
+    {
+        RoadPathArray route;
+        if (GRoadNet->SearchPath(ptStart, ptEnd, route, 8.f) && route.Size() >= 2)
+        {
+            // Sample a navigable intermediate goal about every 18 metres,
+            // with additional goals at sharp bends. Each operative leg then
+            // runs the normal road A* and follows all fine (2 m) links.
+            // Retain original XZ coordinates rather than re-snapping goals
+            // to 50 m strategic grid-cell centres.
+            float totalLength = 0.f;
+            for (int i = 1; i < route.Size(); ++i)
+                totalLength += (route[i] - route[i - 1]).SizeXZ();
+            const float step = floatMax(18.f, totalLength / 750.f);
+
+            std::vector<Vector3> goals;
+            goals.reserve(std::min(route.Size(), 850));
+            goals.push_back(route[0]);
+            float sinceGoal = 0.f;
+            for (int i = 1; i + 1 < route.Size(); ++i)
+            {
+                const Vector3 before = route[i] - route[i - 1];
+                const Vector3 after = route[i + 1] - route[i];
+                const float bLen = before.SizeXZ();
+                const float aLen = after.SizeXZ();
+                sinceGoal += bLen;
+                // Do not lose hairpin/intersection geometry when resampling.
+                const bool corner = bLen > 0.1f && aLen > 0.1f &&
+                    (before.X() * after.X() + before.Z() * after.Z()) <
+                    0.7071f * bLen * aLen;
+                if ((sinceGoal >= step || corner) &&
+                    (route[i] - goals.back()).SquareSizeXZ() > Square(3.f))
+                {
+                    goals.push_back(route[i]);
+                    sinceGoal = 0.f;
+                }
+            }
+            const Vector3 destination = route[route.Size() - 1];
+            if ((destination - goals.back()).SquareSizeXZ() < Square(2.f) &&
+                goals.size() > 1)
+                goals.back() = destination;
+            else
+                goals.push_back(destination);
+
+            _plan.Resize(static_cast<int>(goals.size()));
+            _planPoints.Resize(static_cast<int>(goals.size()));
+            float runningCost = 0.f;
+            for (int i = 0; i < static_cast<int>(goals.size()); ++i)
+            {
+                const Vector3& p = goals[i];
+                FieldPassing& field = _plan[i];
+                field._x = std::clamp(toIntFloor(p.X() * InvLandGrid), 0, LandRange - 1);
+                field._z = std::clamp(toIntFloor(p.Z() * InvLandGrid), 0, LandRange - 1);
+                field._mode = FieldPassing::MoveOnRoad;
+                if (i)
+                    runningCost += (p - goals[i - 1]).SizeXZ() *
+                        veh->GetType()->GetMinCost();
+                field._cost = runningCost;
+                _planPoints[i] = p;
+                _planPoints[i][1] = GLOB_LAND->RoadSurfaceY(p.X(), p.Z());
+            }
+            // An exact editor waypoint can lie just outside the physical
+            // road width; the final few metres are still a legal approach.
+            _planPoints[_planPoints.Size() - 1] = ptEnd;
+
+            _searching = false;
+            LOG_DEBUG(AI, "Car road route: {} graph points, {} strategic goals, length {:.0f} m",
+                      route.Size(), goals.size(), totalLength);
+            return true;
+        }
+    }
+
     if (prec == AI::LevelCommands ||
         (ptStart.Distance2(ptEnd) < Square(DIST_MIN_OPER) && !veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeAir)) &&
          !veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeShip))))
@@ -633,35 +717,6 @@ bool AIPathPlanner::StartSearching(AI::ThinkImportance prec, VehicleWithAI* veh,
     }
     else
     {
-        // For wheeled/tracked vehicles with connected procedural roads,
-        // use the real road graph for the strategic route as well. The
-        // coarse terrain-cell planner can reject a destination when a
-        // narrow road runs across otherwise impassable hillside cells.
-        // Only short-circuit when the existing road graph actually finds
-        // a complete route; otherwise retain the original terrain A*.
-        const bool groundVehicle = veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeCar)) ||
-            veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeAPC)) ||
-            veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeTank));
-        if (groundVehicle && !veh->IsCautious() && GRoadNet && GRoadNet->HasWays() &&
-            GRoadNet->IsOnRoad(ptStart, 8.f) && GRoadNet->IsOnRoad(ptEnd, 8.f))
-        {
-            RoadPathArray route;
-            if (GRoadNet->SearchPath(ptStart, ptEnd, route, 8.f) && route.Size() >= 2)
-            {
-                _plan.Resize(2);
-                _plan[0]._x = xs;
-                _plan[0]._z = zs;
-                _plan[0]._mode = FieldPassing::MoveOnRoad;
-                _plan[1]._x = xe;
-                _plan[1]._z = ze;
-                _plan[1]._mode = FieldPassing::MoveOnRoad;
-                CalculatePlanPositions();
-                _searching = false;
-                LOG_DEBUG(AI, "Using {} procedural road points for strategic vehicle path", route.Size());
-                return true;
-            }
-        }
-
         // target may be out range
         if (!InRange(xs, zs))
         {
