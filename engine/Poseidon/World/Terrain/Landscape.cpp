@@ -2406,10 +2406,10 @@ Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transfo
 }
 
 Object* Landscape::ObjectCreate(int id, LODShapeWithShadow* shape, const Matrix4& transform, int* x, int* z,
-                                bool avoidRecalculation)
+                                bool avoidRecalculation, EntityType* cachedType, bool typeResolved)
 {
-    // create object based on Class hint in LOD 0
-    Object* obj = NewObject(shape, id);
+    // The WRP loader can resolve vehicle-type bank lookups once per shape.
+    Object* obj = NewObject(shape, id, cachedType, typeResolved);
 
     if (obj->GetType() != Primary && obj->GetType() != Network)
     {
