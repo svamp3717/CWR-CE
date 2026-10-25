@@ -52,14 +52,16 @@ choose widths and map road texture paths, and write the node/way records.
   The geometry samples the terrain at every vertex with a 7.5 cm clearance,
   rather than connecting two floating or buried edges. Long ways are split
   into render chunks that fit legacy vertex-index limits.
-* The donor's **largest upward-facing textured polygon** supplies the
-  ribbon's visible road texture. This avoids accidentally using an edge,
-  kerb, or underside texture just because it is the first P3D face.
-  Alpha-bearing textures are composited *after* opaque terrain. Generated
-  roads render with the same Shape/material pipeline as P3D road models,
-  rather than applying terrain-cell palette tint or using the terrain's
-  simpler polygon renderer. Donor UV tiling and offsets are reconstructed
-  from the selected face instead of assuming a generic 0–1 mapping.
+* The donor's **dominant upward-facing surface material**, measured by the
+  sum of its polygon areas, supplies the base asphalt. Distinct narrow
+  shoulder, verge, or painted-overlay materials are drawn as separate
+  terrain-draped bands so a multi-texture P3D no longer becomes one colour.
+  The generator reconstructs donor UV tiling and offsets instead of
+  assigning a generic 0–1 mapping. Generated roads use the Shape/material
+  rendering path, not the terrain-colour-palette renderer. For the closest
+  visual match, specify a `donor=...p3d` rather than a `.paa` or `.pac`
+  texture. Some donor layouts with complex non-strip overlay geometry still
+  require more general face projection.
 * UVs repeat the donor's **visible** road texture along the way. Vehicle
   `GroundCollision` contacts and `RoadSurfaceY` use the donor's **roadway**
   texture, so existing friction/roughness, dust, ground sounds, and effects
@@ -86,7 +88,14 @@ choose widths and map road texture paths, and write the node/way records.
   a new graph. Repeat geography initialization for editor preview reuses
   the graph when the same world is still loaded.
 * Generated-way A* search uses an indexed visited-node table. This avoids
-  quadratic path lookups with dense, 2-metre road segments.
+  quadratic path lookups with dense, 2-metre road segments. The start of a
+  car route accepts the same allowed road-approach tolerance as the end.
+  For connected roads, wheeled and tracked vehicle strategic planning can
+  use the road graph directly before falling back to the legacy terrain
+  search, which may reject narrow roads on otherwise impassable cells.
+* The world log reports the resolved base texture, contact texture, donor
+  UV availability, and number of overlay bands once per donor, to help
+  diagnose asset-specific differences.
 * Changing way definitions or donor textures requires reloading the world.
 * Generated ribbons currently use the compatibility terrain mesh renderer;
   very large road datasets will benefit from spatial batching and a dedicated
