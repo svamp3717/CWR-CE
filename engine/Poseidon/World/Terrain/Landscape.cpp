@@ -2408,7 +2408,7 @@ Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transfo
 
 Object* Landscape::ObjectCreate(int id, LODShapeWithShadow* shape, const Matrix4& transform, int* x, int* z,
                                 bool avoidRecalculation, EntityType* cachedType, bool typeResolved,
-                                WrpObjectProfile* profile)
+                                WrpObjectProfile* profile, RoadType* cachedRoadType)
 {
     // Only sampled placements call the clock. Most calls keep profile == nullptr.
     using Stage = WrpObjectProfile::Stage;
@@ -2426,7 +2426,7 @@ Object* Landscape::ObjectCreate(int id, LODShapeWithShadow* shape, const Matrix4
 
     // The WRP loader can resolve vehicle-type bank lookups once per shape.
     const auto factoryStarted = last;
-    Object* obj = NewObject(shape, id, cachedType, typeResolved);
+    Object* obj = NewObject(shape, id, cachedType, typeResolved, cachedRoadType);
     mark(Stage::Factory);
     if (profile)
     {
