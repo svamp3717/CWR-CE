@@ -667,6 +667,7 @@ void RoadNet::LoadWays(Landscape* land)
     _waySegments.clear();
     _wayMapSegments.clear();
     _wayMeshes.clear();
+    _wayMaterials.clear();
     const char* name = land->GetName();
     if (!name || !*name)
         return;
@@ -920,6 +921,21 @@ void RoadNet::LoadWays(Landscape* land)
                 .Add(new RoadLink(from, to, way.width, surfaceTexture));
         }
     }
+    // Shape::FindSections leaves the surface material unset on generated
+    // meshes. Real P3Ds attach the material from CfgTextureToMaterial in
+    // ShapeSection::SerializeBin. Apply the identical mapping explicitly.
+    // Keep strong references: the material cache can clear on editor preview.
+    std::unordered_set<TexMaterial*> retained;
+    for (auto& mesh : _wayMeshes)
+        for (int i = 0; i < mesh->NSections(); ++i)
+        {
+            ShapeSection& section = mesh->GetSection(i);
+            TexMaterial* material = GTexMaterialBank.TextureToMaterial(section.properties.GetTexture());
+            section.surfMat = material;
+            if (material && retained.insert(material).second)
+                _wayMaterials.emplace_back(material);
+        }
+
     LOG_DEBUG(World, "Loaded {} generated road way segments from {}", _waySegments.size(), path);
 }
 
