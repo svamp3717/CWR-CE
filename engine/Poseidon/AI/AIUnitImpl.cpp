@@ -1733,9 +1733,17 @@ void AIUnit::OperPath(ThinkImportance prec)
 
             saturateMin(planIndex, _planner->GetPlanSize() - 1);
 
+            // DirectNormal / DirectExact copy strategic points as straight
+            // steering legs, bypassing RoadNet::SearchPath. On generated
+            // roads this cuts corners and drives across fields. Even at
+            // strategic think importance, use the normal operative road A*
+            // whenever the strategic target is marked as on-road.
+            const bool followWays = GRoadNet && GRoadNet->HasWays() &&
+                _planner->GetPlanMode(planIndex) == FieldPassing::MoveOnRoad;
+
             if (_lastPlan)
             {
-                if (prec <= LevelFastOperative)
+                if (followWays || prec <= LevelFastOperative)
                 {
                     SetMode(AIUnit::Exact);
                 }
@@ -1755,7 +1763,7 @@ void AIUnit::OperPath(ThinkImportance prec)
             }
             else
             {
-                if (prec <= LevelFastOperative)
+                if (followWays || prec <= LevelFastOperative)
                 {
                     SetMode(AIUnit::Normal);
                 }
