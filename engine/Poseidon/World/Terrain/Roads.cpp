@@ -1660,6 +1660,47 @@ const RoadLink* RoadNet::IsOnRoad(Vector3Par pos, float size) const
     return nullptr;
 }
 
+bool RoadNet::GetNearestWayPoint(Vector3Par pos, float maxDistance, Vector3& nearest) const
+{
+    if (_waySegments.empty() || maxDistance <= 0.f)
+        return false;
+    const int xx = toIntFloor(pos.X() * InvLandGrid);
+    const int zz = toIntFloor(pos.Z() * InvLandGrid);
+    const int cellRadius = std::max(1, static_cast<int>(std::ceil(maxDistance * InvLandGrid)) + 1);
+    float bestDist2 = Square(maxDistance);
+    bool found = false;
+    for (int z = zz - cellRadius; z <= zz + cellRadius; ++z)
+        for (int x = xx - cellRadius; x <= xx + cellRadius; ++x)
+        {
+            if (!InRange(x, z))
+                continue;
+            const RoadList& roads = _roads(x, z);
+            for (int i = 0; i < roads.Size(); ++i)
+            {
+                const RoadLink* link = roads[i];
+                if (!link->IsWay())
+                    continue;
+                const Vector3& from = link->PosConnections()[0];
+                const Vector3& to = link->PosConnections()[1];
+                const float dx = to.X() - from.X(), dz = to.Z() - from.Z();
+                const float len2 = dx * dx + dz * dz;
+                if (len2 < 1e-6f)
+                    continue;
+                const float t = std::clamp(((pos.X() - from.X()) * dx +
+                    (pos.Z() - from.Z()) * dz) / len2, 0.f, 1.f);
+                const Vector3 p = from + (to - from) * t;
+                const float dist2 = (p - pos).SquareSizeXZ();
+                if (dist2 < bestDist2)
+                {
+                    bestDist2 = dist2;
+                    nearest = p;
+                    found = true;
+                }
+            }
+        }
+    return found;
+}
+
 Vector3 RoadNet::GetNearestRoadPoint(Vector3Par pos) const
 {
     // scan all roads near pos
