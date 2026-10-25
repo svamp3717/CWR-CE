@@ -825,7 +825,8 @@ Object* NewObject(LODShapeWithShadow* shape, int id, EntityType* cachedType, boo
     {
         if (className == RSB(forest))
         {
-            BuildingType* type = dynamic_cast<BuildingType*>(typeResolved ? cachedType : FindWorldObjectEntityType(shape));
+            EntityType* entityType = typeResolved ? cachedType : FindWorldObjectEntityType(shape);
+            BuildingType* type = dynamic_cast<BuildingType*>(entityType);
             if (type)
             {
                 type->VehicleAddRef();
