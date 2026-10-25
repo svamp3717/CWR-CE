@@ -136,7 +136,7 @@ private:
 	AutoArray< Matrix4 > m_transPure;
 	
 private:
-	void CheckMouseSelection(Point3& ptMin, Point3& ptMax);
+	void CheckMouseSelection(Point3& ptMin, Point3& ptMax, bool updateSelection = true);
 
 	void UpdateTerrain(Vector3 &position, float change);
 

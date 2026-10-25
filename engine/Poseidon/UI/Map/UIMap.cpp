@@ -3,6 +3,7 @@
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/UI/Map/UIMap.hpp>
+#include <Poseidon/UI/Map/MapIconDensity.hpp>
 #include <Poseidon/UI/Controls/CursorLayout.hpp>
 #include <Poseidon/UI/LayoutCanvas.hpp>
 #include <Poseidon/UI/Locale/Stringtable/CodepageTranscode.hpp>
@@ -1587,6 +1588,13 @@ void CStaticMap::DrawObjects(int i, int j)
     }
 
     const ObjectList& list = GLOB_LAND->GetObjects(j - 1, i);
+    // Large WRPs often pack hundreds of decorative objects into a cell. When
+    // zoomed out their map icons overlap, yet each one still costs a draw call.
+    // Thin only trees, bushes and rocks; buildings and landmarks stay intact.
+    const float cellPoints = 800.0f * _invScaleX / LandRange;
+    const int iconBudget = MapDraw::DecorativeIconBudget(cellPoints);
+    const int decorativeStride = _showIds ? 1 : MapDraw::DecorativeIconStride(list.Size(), iconBudget);
+    int decorativeOrdinal = 0;
     for (int o = 0; o < list.Size(); o++)
     {
         Object* obj = list[o];
@@ -1646,13 +1654,16 @@ void CStaticMap::DrawObjects(int i, int j)
                 }
                 break;
                 case MapTree:
-                    DrawSign(_infoTree, obj->Position());
+                    if ((decorativeOrdinal++ % decorativeStride) == 0)
+                        DrawSign(_infoTree, obj->Position());
                     break;
                 case MapSmallTree:
-                    DrawSign(_infoSmallTree, obj->Position());
+                    if ((decorativeOrdinal++ % decorativeStride) == 0)
+                        DrawSign(_infoSmallTree, obj->Position());
                     break;
                 case MapBush:
-                    DrawSign(_infoBush, obj->Position());
+                    if ((decorativeOrdinal++ % decorativeStride) == 0)
+                        DrawSign(_infoBush, obj->Position());
                     break;
                 case MapChurch:
                     DrawSign(_infoChurch, obj->Position());
@@ -1664,7 +1675,8 @@ void CStaticMap::DrawObjects(int i, int j)
                     DrawSign(_infoCross, obj->Position());
                     break;
                 case MapRock:
-                    DrawSign(_infoRock, obj->Position());
+                    if ((decorativeOrdinal++ % decorativeStride) == 0)
+                        DrawSign(_infoRock, obj->Position());
                     break;
                 case MapBunker:
                     DrawSign(_infoBunker, obj->Position());
