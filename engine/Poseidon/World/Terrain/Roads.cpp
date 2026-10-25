@@ -1416,6 +1416,12 @@ void RoadNet::RefreshWayHeights(Landscape* land)
         }
 }
 
+bool RoadNet::IsBuiltFor(const Landscape* land) const
+{
+    const char* name = land ? land->GetName() : nullptr;
+    return land && _builtForLandscape == land && _builtForName == (name ? name : "");
+}
+
 void RoadNet::Build(Landscape* land)
 {
     Scan(land);
@@ -1424,6 +1430,9 @@ void RoadNet::Build(Landscape* land)
     ConnectWayJunctions();
     Optimize();
     Compact();
+    _builtForLandscape = land;
+    const char* name = land->GetName();
+    _builtForName = name ? name : "";
 }
 
 SRef<RoadNet> GRoadNet; // global instance
