@@ -359,7 +359,7 @@ void RoadNet::LoadWays(Landscape* land)
                 points.push_back(it->second);
                 continue;
             }
-            Vector3Val from = points.back();
+            Vector3 from = points.back(); // copy: appending below can reallocate points
             Vector3Val to = it->second;
             const float dx = to.X() - from.X(), dz = to.Z() - from.Z();
             const float length = std::sqrt(dx * dx + dz * dz);
@@ -402,8 +402,10 @@ void RoadNet::LoadWays(Landscape* land)
         float distance = 0.f;
         for (size_t i = 0; i < points.size(); ++i)
         {
-            const Vector3 before = WayPerpendicular(points[i == 0 ? i : i - 1], points[i == 0 ? i + 1 : i]);
-            const Vector3 after = WayPerpendicular(points[i], points[i + 1 < points.size() ? i + 1 : i]);
+            const Vector3 before = i == 0 ? WayPerpendicular(points[0], points[1])
+                : WayPerpendicular(points[i - 1], points[i]);
+            const Vector3 after = i + 1 == points.size() ? before
+                : WayPerpendicular(points[i], points[i + 1]);
             Vector3 perp = before + after;
             const float norm = std::sqrt(perp.SquareSizeXZ());
             if (norm < 1e-4f)
