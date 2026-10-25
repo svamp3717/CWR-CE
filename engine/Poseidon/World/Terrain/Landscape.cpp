@@ -903,6 +903,8 @@ void Landscape::HeightChange(int x, int z, float y)
 {
     PoseidonAssert(this_TerrainInRange(x, z));
     SetData(x, z, y);
+    // Batch successive editing operations into one rebuild at next draw.
+    _roadWayGeometryDirty = true;
     // FlushCache();
 }
 
