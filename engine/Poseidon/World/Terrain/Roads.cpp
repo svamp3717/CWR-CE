@@ -99,6 +99,7 @@ RoadNet::~RoadNet() = default;
 void RoadNet::Scan(Landscape* land)
 {
     _roads.Dim(LandRange, LandRange);
+    int roadLinks = 0;
     // insert all road objects into the road list
     int x, z;
     for (x = 0; x < LandRange; x++)
@@ -185,9 +186,11 @@ void RoadNet::Scan(Landscape* land)
                 // insert into corresponding square
                 RoadList& list = SelectRoadList(avg.X(), avg.Z());
                 list.Add(elem);
+                ++roadLinks;
             }
         }
     }
+    LOG_INFO(World, "WRP roads: scanned {} road links", roadLinks);
 }
 
 Vector3 RoadLink::GetCenter() const
@@ -275,6 +278,7 @@ static bool IsConnected(const RoadLink* tItem, const RoadLink* item, int maxDept
 #define DIAG_COUNT 0
 void RoadNet::Connect()
 {
+    const DWORD pass1Started = Foundation::GlobalTickCount();
 #if DIAG_COUNT
     int count[4];
     memset(count, 0, sizeof(count));
@@ -356,6 +360,7 @@ void RoadNet::Connect()
     }
 #endif
     // second pass: try to connect road unconnected points to something
+    const DWORD pass1Finished = Foundation::GlobalTickCount();
 
     const float maxDistConPass2 = 7.0;
     for (int x = 0; x < LandRange; x++)
@@ -471,6 +476,8 @@ void RoadNet::Connect()
             } // for(i)
         } // for(x,z)
     }
+    LOG_INFO(World, "WRP roads connect: direct {} ms, nearby repair {} ms",
+             pass1Finished - pass1Started, Foundation::GlobalTickCount() - pass1Finished);
 }
 
 void RoadNet::Optimize()
