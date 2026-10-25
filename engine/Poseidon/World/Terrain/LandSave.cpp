@@ -61,6 +61,7 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
     ProgressStart(LocalizeString(IDS_LOAD_WORLD));
 
     Log("Begin landscape load (%d KB).", Foundation::MemoryUsed() / 1024);
+    const DWORD wrpStarted = Poseidon::Foundation::GlobalTickCount();
 
     int i;
     int x, z;
@@ -109,14 +110,9 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
 
     FlushCache();
 
-    for (z = 0; z < _landRange; z++)
-    {
-        for (x = 0; x < _landRange; x++)
-        {
-            SetTex(x, z, 0);
-            SetData(x, z, 0);
-        }
-    }
+    // The two arrays are completely overwritten by the next two loops.
+    // Clearing every cell first is a wasted pass over huge 4096/8192 WRP
+    // terrain grids (and needlessly dirties the renderer heightmap).
     for (z = 0; z < header.zRange; z++)
     {
         for (x = 0; x < header.xRange; x++)
@@ -169,6 +165,7 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
         return LSUnknownError;
     }
 
+    const DWORD objectsStarted = Poseidon::Foundation::GlobalTickCount();
     const int maxID = 65536;
     bool isID[maxID];
     memset(isID, 0, sizeof(isID));
@@ -212,7 +209,7 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
                 break; // object list terminated
             }
             int id = NewObjectID();
-            ObjectCreate(id, so.name, ConvertToM(so.matrix));
+            ObjectCreate(id, so.name, ConvertToM(so.matrix), nullptr, nullptr, true);
         }
         else
         {
@@ -245,7 +242,7 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
                 isID[so.id] = true;
             }
             PoseidonAssert(so.id >= 0);
-            ObjectCreate(so.id, so.name, ConvertToM(so.matrix));
+            ObjectCreate(so.id, so.name, ConvertToM(so.matrix), nullptr, nullptr, true);
         }
 
         // A very large WRP can have millions of objects. Updating the UI for
@@ -262,7 +259,11 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
 
     Log("Landscape loaded. (%d KB).", Foundation::MemoryUsed() / 1024);
 
+    const DWORD geographyStarted = Poseidon::Foundation::GlobalTickCount();
     InitGeography();
+    const DWORD geographyFinished = Poseidon::Foundation::GlobalTickCount();
+    Log("WRP RVW: terrain %u ms, objects %u ms", objectsStarted - wrpStarted, geographyStarted - objectsStarted);
+    Log("WRP RVW: geography %u ms, total objects %d", geographyFinished - geographyStarted, countObjects);
 
     ProgressFinish();
 
@@ -1586,6 +1587,7 @@ void Landscape::SerializeBin(SerializeBinStream& f, float landGrid)
 
 bool Landscape::LoadOptimized(QIStream& f, float landGrid)
 {
+    const DWORD wrpStarted = Poseidon::Foundation::GlobalTickCount();
     WrpReader reader;
     if (!reader.Load(f, true))
     {
@@ -1593,6 +1595,7 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
         return false;
     }
 
+    const DWORD parsedAt = Poseidon::Foundation::GlobalTickCount();
     if (reader.GetFormat() != WrpReader::OPRW_V2 && reader.GetFormat() != WrpReader::OPRW_V3)
     {
         RptF("LoadOptimized: unexpected format %s", reader.GetFormatName());
@@ -1624,11 +1627,19 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     memcpy(_tex.RawData(), reader.GetTexIndices().Data(), reader.GetTexIndices().Size());
     memcpy(_random.RawData(), reader.GetRandom().Data(), reader.GetRandom().Size());
 
-    // Copy heightmap into _data
-    const float* heights = reader.GetHeightmapData();
-    for (int z = 0; z < ly; z++)
-        for (int x = 0; x < lx; x++)
-            SetData(x, z, heights[z * lx + x]);
+    // RawType is float in this renderer, so both arrays have the same
+    // layout. Copy the heightmap once rather than calling SetData for
+    // every cell of a multi-million-sample WRP.
+    static_assert(sizeof(RawType) == sizeof(float), "OPRW raw terrain layout must be float");
+    const int heightBytes = reader.GetHeightmapSize() * static_cast<int>(sizeof(float));
+    if (heightBytes != _data.RawSize())
+    {
+        RptF("LoadOptimized: heightmap size does not match terrain grid");
+        ProgressFinish();
+        return false;
+    }
+    memcpy(_data.RawData(), reader.GetHeightmapData(), heightBytes);
+    _heightmapDirty = true;
 
     // Copy mountains
     _mountains = reader.GetMountains();
@@ -1647,6 +1658,7 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     AutoArray<InitPtr<Object>> idCache;
     AutoArray<AutoArray<InitPtr<Object>>> conflicts;
     int objectsLoaded = 0;
+    const DWORD objectsStarted = Poseidon::Foundation::GlobalTickCount();
 
     for (;;)
     {
@@ -1664,7 +1676,7 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
         GFileServer->Request(obj.name, 1.0f);
 #endif
         int x, z;
-        Object* o = ObjectCreate(obj.id, obj.name, obj.transform, &x, &z);
+        Object* o = ObjectCreate(obj.id, obj.name, obj.transform, &x, &z, true);
 
         idCache.Access(obj.id);
         if (idCache[obj.id])
@@ -1699,6 +1711,9 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
         }
     }
 
+    const DWORD objectsFinished = Poseidon::Foundation::GlobalTickCount();
+    Log("WRP OPRW: decode %u ms, terrain %u ms", parsedAt - wrpStarted, objectsStarted - parsedAt);
+    Log("WRP OPRW: objects %u ms, total objects %d", objectsFinished - objectsStarted, objectsLoaded);
     ProgressFinish();
     return true;
 }

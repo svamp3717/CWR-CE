@@ -100,3 +100,33 @@ TEST_CASE("Landscape ID cache rebuild raises the runtime ID floor", "[World][Ter
     REQUIRE(landscape.GetObject(42) == laterTerrainObject);
     REQUIRE(landscape.NewObjectID() == 43);
 }
+
+TEST_CASE("Bulk WRP object insertion expands cell bounds without rescanning", "[World][Terrain][WRP][Performance]")
+{
+    // The old per-object StaticChanged() rescanned the whole cell after
+    // every inserted tree/rock/building: O(n^2) for a dense 750 MB island.
+    // The incremental bound must still contain every inserted static object.
+    // ObjectListFull(x, z) reads the global LandGrid while placing its cell
+    // center, so it requires a live landscape just like the other tests here.
+    Landscape landscape(nullptr, nullptr);
+    GlobalLandscapeScope globalLandscape(&landscape);
+    ObjectListFull list(0, 0);
+    list.SetBSphere(VZero, 50);
+
+    for (int i = 0; i < 400; ++i)
+    {
+        Ref<ObjectPlain> object = new ObjectPlain(nullptr, i);
+        object->SetPosition(Vector3(static_cast<float>(i), 0, 0));
+        REQUIRE(list.Add(object, true) >= 0);
+    }
+
+    REQUIRE(list.Size() == 400);
+    CHECK(list.GetNonStaticCount() == 0);
+    CHECK(list.GetBSphereRadius() >= 399.0f);
+
+    // Rebuilding after the load may tighten but must not enlarge the bound.
+    const float incrementalRadius = list.GetBSphereRadius();
+    list.StaticChanged();
+    CHECK(list.GetBSphereRadius() <= incrementalRadius);
+    CHECK(list.GetBSphereRadius() >= 399.0f);
+}
