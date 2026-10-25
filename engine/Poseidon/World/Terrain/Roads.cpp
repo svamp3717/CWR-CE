@@ -430,8 +430,12 @@ void RoadNet::LoadWays(Landscape* land)
             if (i)
                 distance += std::sqrt((points[i].X() - points[i-1].X()) * (points[i].X() - points[i-1].X())
                     + (points[i].Z() - points[i-1].Z()) * (points[i].Z() - points[i-1].Z()));
-            const Vector3 left = center + perp * halfWidth;
-            const Vector3 right = center - perp * halfWidth;
+            Vector3 left = center + perp * halfWidth;
+            Vector3 right = center - perp * halfWidth;
+            // Conform both edges independently on sloped terrain. Sampling
+            // only the centre would leave wide roads floating or buried.
+            left[1] = land->SurfaceY(left.X(), left.Z()) + 0.08f;
+            right[1] = land->SurfaceY(right.X(), right.Z()) + 0.08f;
             const float v = texture->VToPhysical(distance / way.width);
             mesh->AddVertexFast(left, VUp, ClipAll, texture->UToPhysical(0), v);
             mesh->AddVertexFast(right, VUp, ClipAll, texture->UToPhysical(1), v);
