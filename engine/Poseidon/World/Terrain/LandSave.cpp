@@ -324,6 +324,8 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
     }
     LOG_DEBUG(World, "Total {} objects, max. id {}", countObjects, maxObjID);
     LOG_INFO(World, "WRP RVW: {} distinct model shapes", shapeCache.size());
+    LOG_INFO(World, "WRP RVW: object ID cache {} slots, approx {} MiB", _objectIds.Size(),
+             static_cast<double>(_objectIds.Size()) * sizeof(_objectIds[0]) / (1024.0 * 1024.0));
     LogWrpObjectProfile("RVW", objectProfile, countObjects);
 
     ProgressFrame();
@@ -1740,6 +1742,7 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     AutoArray<InitPtr<Object>> idCache;
     AutoArray<AutoArray<InitPtr<Object>>> conflicts;
     int objectsLoaded = 0;
+    int duplicateIDs = 0;
     WrpObjectProfile objectProfile;
     const DWORD objectsStarted = Poseidon::Foundation::GlobalTickCount();
 
@@ -1774,6 +1777,7 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
         idCache.Access(obj.id);
         if (idCache[obj.id])
         {
+            ++duplicateIDs;
             conflicts.Access(obj.id);
             conflicts[obj.id].Add(o);
         }
@@ -1810,6 +1814,12 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     LOG_INFO(World, "WRP OPRW: decode {} ms, terrain {} ms", parsedAt - wrpStarted, objectsStarted - parsedAt);
     LOG_INFO(World, "WRP OPRW: objects {} ms, total objects {}", objectsFinished - objectsStarted, objectsLoaded);
     LOG_INFO(World, "WRP OPRW: unique shapes {} / {} indexed names", uniqueShapesLoaded, reader.GetObjectNameCount());
+    LOG_INFO(World, "WRP OPRW: ID slots primary {}, conflict {}, temporary {}, duplicate IDs {}", _objectIds.Size(),
+             conflicts.Size(), idCache.Size(), duplicateIDs);
+    LOG_INFO(World, "WRP OPRW: ID table storage approx {:.1f} MiB (excludes objects and excess capacity)",
+             (static_cast<double>(_objectIds.Size()) * sizeof(_objectIds[0]) +
+              static_cast<double>(idCache.Size()) * sizeof(idCache[0]) +
+              static_cast<double>(conflicts.Size()) * sizeof(conflicts[0])) / (1024.0 * 1024.0));
     LogWrpObjectProfile("OPRW", objectProfile, objectsLoaded);
     ProgressFinish();
     return true;
