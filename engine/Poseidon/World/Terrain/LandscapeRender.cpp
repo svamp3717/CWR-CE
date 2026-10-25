@@ -8,6 +8,7 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/Roads.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Game/OperMap.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
@@ -1704,6 +1705,30 @@ namespace Poseidon
 
 #endif
 
+// Model-free road ribbons use the same legacy textured-mesh pipeline as
+// ground polygons. Their positions, UVs and material come from RoadNet ways,
+// not from individually placed road P3D models.
+void Landscape::DrawRoadWays(const LandBegEnd& bigRect, Scene& scene)
+{
+    if (!GRoadNet || !GRoadNet->HasWays())
+        return;
+
+    const float minX = bigRect.xBeg * _landGrid;
+    const float maxX = bigRect.xEnd * _landGrid;
+    const float minZ = bigRect.zBeg * _landGrid;
+    const float maxZ = bigRect.zEnd * _landGrid;
+    for (const auto& mesh : GRoadNet->WayMeshes())
+    {
+        const Vector3 min = mesh->Min();
+        const Vector3 max = mesh->Max();
+        if (max.X() < minX || min.X() > maxX || max.Z() < minZ || min.Z() > maxZ)
+            continue;
+        TLVertexTable table;
+        table.DoTransformPoints(&GAnimatorDefault, *mesh, scene.ScaledInvTransform());
+        DrawMesh(scene, table, *mesh, VZero, bigRect, false);
+    }
+}
+
 void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
 {
     Camera& camera = *scene.GetCamera();
@@ -1745,6 +1770,7 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
         {
             DrawGround(bigRect, scene, opaqueLayer);
         }
+        DrawRoadWays(bigRect, scene);
     }
 #endif
 
