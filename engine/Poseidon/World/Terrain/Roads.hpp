@@ -163,6 +163,7 @@ class RoadNet: public RefCount
 	static void SampleWayRoute(const RoadPathArray &route, std::vector<Vector3> &goals);
 	const RoadLink *IsOnRoad( Vector3Par pos, float size ) const;
 	Vector3 GetNearestRoadPoint( Vector3Par pos ) const;
+	bool GetNearestWayPoint(Vector3Par pos, float maxDistance, Vector3 &nearest) const;
 	inline RoadList &GetRoadList( int xx, int zz ); // used for diags
 
 	bool IsLocked( Vector3Par pos, float size ) const;
