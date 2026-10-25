@@ -172,6 +172,8 @@ public:
 	virtual void Init() = 0 ;
 
 	virtual bool IsSearching() const = 0;
+	// True only for procedural-way graph routes; P3D-only plans stay unchanged.
+	virtual bool IsUsingWayRoute() const {return false;}
 
 	virtual int GetPlanSize() const = 0;
 	virtual float GetTotalCost() const =0;
