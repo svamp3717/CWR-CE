@@ -192,9 +192,10 @@ void RoadNet::Scan(Landscape* land)
 Vector3 RoadLink::GetCenter() const
 {
     Vector3 center = VZero;
+    const Vector3* pos = PosConnections();
     for (int i = 0; i < _nCon; i++)
     {
-        center += _pos[i];
+        center += pos[i];
     }
     center *= 1.0 / _nCon;
 
@@ -204,9 +205,10 @@ Vector3 RoadLink::GetCenter() const
 float RoadLink::NearestConnectionDist2(Vector3Val pos) const
 {
     float dist2Min = 1e10;
+    const Vector3* connections = PosConnections();
     for (int i = 0; i < _nCon; i++)
     {
-        float dist2 = (_pos[i] - pos).SquareSizeXZ();
+        float dist2 = (connections[i] - pos).SquareSizeXZ();
         if (dist2 < dist2Min)
         {
             dist2Min = dist2;
