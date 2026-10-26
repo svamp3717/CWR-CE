@@ -803,9 +803,9 @@ void RoadNet::LoadWays(Landscape* land)
     {
         auto it = donorCache.find(name);
         if (it != donorCache.end())
-            return it->second;
+            return it->second.GetRef();
         Ref<LODShapeWithShadow> loaded = Shapes.New(name.c_str(), false, true);
-        LODShapeWithShadow* ptr = loaded;
+        LODShapeWithShadow* ptr = loaded.GetRef();
         donorCache.emplace(name, loaded);
         return ptr;
     };
