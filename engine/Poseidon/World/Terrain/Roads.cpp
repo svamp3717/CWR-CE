@@ -625,6 +625,28 @@ std::vector<RoadDonorBand> FindDonorBands(Shape* shape, Texture* baseTexture)
     return bands;
 }
 
+// Worldgen's existing texture-only .ways files name the original CWA road
+// skins directly. Borrow the corresponding stock P3D's *rendering style*
+// (decoded vertex hints, normal orientation, optional UV) without requiring
+// Worldgen to regenerate or rewrite the sidecar. This does not place a P3D
+// object or change the texture/roadway collision asset the way requested.
+const char* StockDonorForRoadTexture(const std::string& path)
+{
+    std::string key = path;
+    for (char& c : key)
+    {
+        if (c == '/') c = '\\';
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    }
+    if (key == "o\\road\\sil_new.paa" || key == "o\\road\\sil_new.pac")
+        return "o\\road\\sil25.p3d";
+    if (key == "o\\road\\ces_hned.paa" || key == "o\\road\\ces_hned.pac")
+        return "o\\road\\ces25.p3d";
+    if (key == "o\\road\\asf_new.paa" || key == "o\\road\\asf_new.pac")
+        return "o\\road\\asf25.p3d";
+    return nullptr;
+}
+
 bool IsDonorName(const std::string& name)
 {
     if (name.compare(0, 6, "donor=") == 0)
@@ -773,6 +795,20 @@ void RoadNet::LoadWays(Landscape* land)
     // latter join the original P3D links using RoadNet::Connect's endpoint logic.
     // Emit only one diagnostic per source; maps can contain thousands of ways.
     std::unordered_set<std::string> reportedMaterials;
+    // Retain donor P3Ds just for this load pass. The ShapeBank uses weak
+    // references, so thousands of ways sharing a stock style would otherwise
+    // reload the same model repeatedly.
+    std::unordered_map<std::string, Ref<LODShapeWithShadow>> donorCache;
+    auto findDonor = [&donorCache](const std::string& name) -> LODShapeWithShadow*
+    {
+        auto it = donorCache.find(name);
+        if (it != donorCache.end())
+            return it->second;
+        Ref<LODShapeWithShadow> loaded = Shapes.New(name.c_str(), false, true);
+        LODShapeWithShadow* ptr = loaded;
+        donorCache.emplace(name, loaded);
+        return ptr;
+    };
     for (const ParsedWay& way : ways)
     {
         std::vector<Vector3> points;
@@ -833,11 +869,12 @@ void RoadNet::LoadWays(Landscape* land)
         RoadDonorAppearance visual;
         std::vector<RoadDonorBand> bands;
         int donorSpecial = 0;
+        bool hasDonorRenderStyle = false;
         if (IsDonorName(way.texture))
         {
             const std::string donorPath = way.texture.compare(0, 6, "donor=") == 0
                 ? way.texture.substr(6) : way.texture;
-            Ref<LODShapeWithShadow> donor = Shapes.New(donorPath.c_str(), false, true);
+            LODShapeWithShadow* donor = findDonor(donorPath);
             if (donor)
             {
                 // The top visual face supplies the exact road appearance.
@@ -847,6 +884,7 @@ void RoadNet::LoadWays(Landscape* land)
                     visual = FindDonorTopFace(donor->LevelOpaque(0));
                     texture = visual.texture;
                     donorSpecial = visual.special;
+                    hasDonorRenderStyle = visual.hasVertexStyle;
                     bands = FindDonorBands(donor->LevelOpaque(0), texture);
                 }
                 surfaceTexture = FindDonorTopFace(donor->RoadwayLevel()).texture;
@@ -860,6 +898,27 @@ void RoadNet::LoadWays(Landscape* land)
         {
             texture = GlobLoadTexture(way.texture.c_str());
             surfaceTexture = texture;
+            // Existing texture-only WRP/PBOs get the stock surface lighting
+            // style automatically, but the explicit texture remains the
+            // rendered and wheel-contact texture.
+            const char* stockPath = StockDonorForRoadTexture(way.texture);
+            if (stockPath && texture)
+            {
+                LODShapeWithShadow* donor = findDonor(stockPath);
+                if (donor && donor->NLevels() > 0)
+                {
+                    RoadDonorAppearance stock = FindDonorTopFace(donor->LevelOpaque(0));
+                    // Only reuse UVs/materials when the P3D actually uses
+                    // this exact skin; avoid incorrect projections if a mod
+                    // has replaced the stock donor with different artwork.
+                    if (stock.texture == texture && stock.hasVertexStyle)
+                    {
+                        visual = stock;
+                        donorSpecial = stock.special;
+                        hasDonorRenderStyle = true;
+                    }
+                }
+            }
         }
         if (!texture || !surfaceTexture)
         {
@@ -871,7 +930,7 @@ void RoadNet::LoadWays(Landscape* land)
                      "Generated road material '{}': visual='{}', contact='{}', donorUV={}, overlayBands={}, vertexStyle={}, normalDown={}, vertexClip=0x{:08x}, donorFlags=0x{:08x}, wayFlags=0x{:08x}",
                      way.texture, texture->Name(), surfaceTexture->Name(), visual.hasUV, bands.size(),
                      visual.hasVertexStyle, visual.normalDown, static_cast<unsigned>(visual.vertexFlags),
-                     donorSpecial, WayFaceFlags(donorSpecial, IsDonorName(way.texture),
+                     donorSpecial, WayFaceFlags(donorSpecial, hasDonorRenderStyle,
                                                 texture->GetAlphaClass() == AlphaStats::Blend));
 
         // Keep original unsampled edges for the 2D map.
@@ -915,7 +974,7 @@ void RoadNet::LoadWays(Landscape* land)
             // instead of their alpha-composited colour.
             // Preserve original donor sampling, transparency and ordering.
             // The generic fallback is only for texture-only .ways entries.
-            poly.SetSpecial(WayFaceFlags(donorSpecial, IsDonorName(way.texture),
+            poly.SetSpecial(WayFaceFlags(donorSpecial, hasDonorRenderStyle,
                                          texture->GetAlphaClass() == AlphaStats::Blend));
             for (size_t i = first; i < last; ++i)
             {
