@@ -354,6 +354,13 @@ struct RoadDonorAppearance
     float uX = 0, uZ = 0, uC = 0;
     float vX = 0, vZ = 0, vC = 0;
     float xMin = 0, xMax = 0, zMin = 0;
+    // Native CWA road P3Ds deliberately carry downward (-Y) visual vertex
+    // normals, despite being drawn from above. They also encode material,
+    // fog and surface hints in per-vertex ClipFlags. Generating +Y/ClipAll
+    // discarded both parts of the donor's lighting information.
+    bool hasVertexStyle = false;
+    bool normalDown = false;
+    ClipFlags vertexFlags = ClipAll;
 };
 
 // Recover the source P3D face's *actual* UV projection. Blindly mapping U
@@ -363,6 +370,18 @@ void ReadDonorUV(RoadDonorAppearance& out, const Shape& shape, const Poly& poly)
 {
     if (!out.texture || poly.N() < 3)
         return;
+    // ShapeAdapter and native MLOD loading have already translated source
+    // ODOL point flags into their runtime ClipFlags. Never reinterpret the
+    // raw 0x13f ODOL point mask here; copy the decoded value from the donor.
+    float sourceNormalY = 0.f;
+    for (int k = 0; k < poly.N(); ++k)
+        sourceNormalY += shape.Norm(poly.GetVertex(k)).Y();
+    if (std::fabs(sourceNormalY) > 0.001f)
+    {
+        out.hasVertexStyle = true;
+        out.normalDown = sourceNormalY < 0.f;
+        out.vertexFlags = shape.Clip(poly.GetVertex(0));
+    }
     out.xMin = 1e10f;
     out.xMax = -1e10f;
     out.zMin = 1e10f;
@@ -677,6 +696,8 @@ void AppendDonorBandMeshes(std::vector<std::unique_ptr<Shape>>& meshes, Landscap
                     RoadWaySurfaceOffset + 0.006f;
                 Vector3 normal(-dx, 1, -dz);
                 normal.Normalize();
+                if (band.appearance.hasVertexStyle && band.appearance.normalDown)
+                    normal *= -1.f; // match native P3D surface light response
                 const float donorX = band.appearance.xMin +
                     (band.appearance.xMax - band.appearance.xMin) * t;
                 const float donorZ = band.appearance.zMin + uvDistance[i];
@@ -684,7 +705,8 @@ void AppendDonorBandMeshes(std::vector<std::unique_ptr<Shape>>& meshes, Landscap
                     band.appearance.uZ * donorZ;
                 const float vv = band.appearance.vC + band.appearance.vX * donorX +
                     band.appearance.vZ * donorZ;
-                mesh->AddVertexFast(pos, normal, ClipAll,
+                mesh->AddVertexFast(pos, normal,
+                                    band.appearance.hasVertexStyle ? band.appearance.vertexFlags : ClipAll,
                                     texture->UToPhysical(uu), texture->VToPhysical(vv));
             }
             if (i > first)
@@ -846,8 +868,9 @@ void RoadNet::LoadWays(Landscape* land)
         }
         if (reportedMaterials.insert(way.texture).second)
             LOG_INFO(World,
-                     "Generated road material '{}': visual='{}', contact='{}', donorUV={}, overlayBands={}, donorFlags=0x{:08x}, wayFlags=0x{:08x}",
+                     "Generated road material '{}': visual='{}', contact='{}', donorUV={}, overlayBands={}, vertexStyle={}, normalDown={}, vertexClip=0x{:08x}, donorFlags=0x{:08x}, wayFlags=0x{:08x}",
                      way.texture, texture->Name(), surfaceTexture->Name(), visual.hasUV, bands.size(),
+                     visual.hasVertexStyle, visual.normalDown, static_cast<unsigned>(visual.vertexFlags),
                      donorSpecial, WayFaceFlags(donorSpecial, IsDonorName(way.texture),
                                                 texture->GetAlphaClass() == AlphaStats::Blend));
 
@@ -916,6 +939,8 @@ void RoadNet::LoadWays(Landscape* land)
                     pos[1] = land->SurfaceY(pos.X(), pos.Z(), &dx, &dz) + RoadWaySurfaceOffset;
                     Vector3 normal(-dx, 1, -dz);
                     normal.Normalize();
+                    if (visual.hasVertexStyle && visual.normalDown)
+                        normal *= -1.f; // stock o\\road road models use -Y normals
                     float uu = u, vv = uvDistance[i] / way.width;
                     if (visual.hasUV)
                     {
@@ -927,7 +952,8 @@ void RoadNet::LoadWays(Landscape* land)
                         uu = visual.uC + visual.uX * donorX + visual.uZ * donorZ;
                         vv = visual.vC + visual.vX * donorX + visual.vZ * donorZ;
                     }
-                    mesh->AddVertexFast(pos, normal, ClipAll,
+                    mesh->AddVertexFast(pos, normal,
+                                        visual.hasVertexStyle ? visual.vertexFlags : ClipAll,
                                         texture->UToPhysical(uu), texture->VToPhysical(vv));
                 }
 
