@@ -183,8 +183,26 @@ TEST_CASE("Generated road faces preserve renderer clockwise front winding", "[Wo
         // Poly::GetNormal has the reverse convention to the render frontend,
         // so this negative result is expected for correctly visible faces.
         REQUIRE(triangle.GetNormal(mesh).Y() < 0.f);
-        // Lighting still uses deliberately upward-facing per-vertex normals.
+        // Texture-only roads without stock donors still use their generic
+        // upward fallback. Real stock donors carry downward vertex normals.
         for (int v = 0; v < triangle.N(); ++v)
             REQUIRE(mesh.Norm(triangle.GetVertex(v)).Y() > 0.f);
     }
+}
+
+TEST_CASE("Native stock road lighting hemisphere is retained on terrain-following ways", "[World][RoadWays][Rendering]")
+{
+    // Worldgen's measured stock road donor o\\road\\sil25.p3d carries
+    // downward visual normals even though clockwise faces render from above.
+    // The previous generator always supplied +Y, leading to a very different
+    // light response with the identical sil_new.paa artwork.
+    Vector3 terrainUp(-0.1f, 1.f, -0.2f);
+    terrainUp.Normalize();
+    const Vector3 stock = RoadNet::WayLitNormal(terrainUp, true);
+    const Vector3 generic = RoadNet::WayLitNormal(terrainUp, false);
+    REQUIRE(stock.Y() < 0.f);
+    REQUIRE(generic.Y() > 0.f);
+    REQUIRE(stock.X() == Catch::Approx(-generic.X()));
+    REQUIRE(stock.Y() == Catch::Approx(-generic.Y()));
+    REQUIRE(stock.Z() == Catch::Approx(-generic.Z()));
 }
