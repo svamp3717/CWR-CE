@@ -937,12 +937,19 @@ void RoadNet::LoadWays(Landscape* land)
             continue;
         }
         if (reportedMaterials.insert(way.texture).second)
+        {
+            if (!IsDonorName(way.texture) && StockDonorForRoadTexture(way.texture) &&
+                !hasDonorRenderStyle)
+                LOG_WARN(World,
+                         "Stock road skin '{}' could not inherit donor vertex lighting. Verify o\\road P3D assets are mounted and the donor uses the specified texture.",
+                         way.texture);
             LOG_INFO(World,
                      "Generated road material '{}': visual='{}', contact='{}', donorUV={}, overlayBands={}, vertexStyle={}, normalDown={}, vertexClip=0x{:08x}, donorFlags=0x{:08x}, wayFlags=0x{:08x}",
                      way.texture, texture->Name(), surfaceTexture->Name(), visual.hasUV, bands.size(),
                      visual.hasVertexStyle, visual.normalDown, static_cast<unsigned>(visual.vertexFlags),
                      donorSpecial, WayFaceFlags(donorSpecial, hasDonorRenderStyle,
                                                 texture->GetAlphaClass() == AlphaStats::Blend));
+        }
 
         // Keep original unsampled edges for the 2D map.
         for (size_t i = 1; i < way.nodes.size(); ++i)
