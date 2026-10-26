@@ -11,7 +11,9 @@
 #include <Poseidon/World/Terrain/Roads.hpp>
 #include <float.h>
 #include <stdlib.h>
+#include <algorithm>
 #include <cmath>
+#include <vector>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Containers/HashMap.hpp>
@@ -471,6 +473,7 @@ class AIPathPlanner : public IAIPathPlanner
 
     float _heuristic;
     bool _searching;
+    bool _usingWayRoute = false;
 
     CostFunction _costFunction;
     void* _param;
@@ -487,6 +490,7 @@ class AIPathPlanner : public IAIPathPlanner
     LSError Serialize(ParamArchive& ar) override;
 
     bool IsSearching() const override { return _searching; }
+    bool IsUsingWayRoute() const override { return _usingWayRoute; }
 
     int GetPlanSize() const override { return _plan.Size(); }
     float GetTotalCost() const override;
@@ -554,6 +558,7 @@ void AIPathPlanner::Init()
     _planPoints.Clear();
     _destination = VZero;
     _searching = false;
+    _usingWayRoute = false;
 }
 
 template <>
@@ -582,6 +587,7 @@ LSError AIPathPlanner::Serialize(ParamArchive& ar)
     {
         // do not save/load partial searching
         _searching = false;
+        _usingWayRoute = false;
         // _costFunction, _param already initialized
     }
     return LSOK;
@@ -596,6 +602,7 @@ bool AIPathPlanner::StartSearching(AI::ThinkImportance prec, VehicleWithAI* veh,
     }
     _vehicle = veh;
     _destination = ptEnd;
+    _usingWayRoute = false;
 
     MapCoord xs = toIntFloor(ptStart.X() * InvLandGrid);
     MapCoord zs = toIntFloor(ptStart.Z() * InvLandGrid);
@@ -614,6 +621,75 @@ bool AIPathPlanner::StartSearching(AI::ThinkImportance prec, VehicleWithAI* veh,
 #endif
 
     AI_ERROR(!_searching);
+
+    // Keep the centreline of the actual road graph as the strategic plan.
+    // The old procedural shortcut returned a successful graph search, then
+    // stored ONLY the start and finish: all turns were discarded and the
+    // operative driver cut straight across fields to the waypoint.
+    //
+    // Resolve this before the LevelCommands / short-distance early exit:
+    // editor Move waypoints commonly enter via that branch too.
+    const bool groundVehicle = veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeCar)) ||
+        veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeAPC)) ||
+        veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeTank));
+    Vector3 roadEntry, roadExit;
+    if (groundVehicle && !veh->IsCautious() && GRoadNet && GRoadNet->HasWays() &&
+        GRoadNet->GetNearestWayPoint(ptStart, 12.f, roadEntry) &&
+        GRoadNet->GetNearestWayPoint(ptEnd, 35.f, roadExit) &&
+        (roadEntry - roadExit).SquareSizeXZ() > Square(3.f))
+    {
+        RoadPathArray route;
+        if (GRoadNet->SearchPath(roadEntry, roadExit, route, 3.f) && route.Size() >= 2)
+        {
+            // Retain bends even if the exact editor waypoint was placed
+            // alongside the road rather than directly on the centerline.
+            std::vector<Vector3> goals;
+            RoadNet::SampleWayRoute(route, goals);
+            if (goals.size() < 2)
+                return false;
+
+            const bool approachRoad = (ptStart - roadEntry).SquareSizeXZ() > Square(3.f);
+            const bool leaveRoad = (ptEnd - roadExit).SquareSizeXZ() > Square(3.f);
+            if (approachRoad)
+                goals.insert(goals.begin(), ptStart);
+            if (leaveRoad)
+                goals.push_back(ptEnd);
+
+            float totalLength = 0.f;
+            for (int i = 1; i < route.Size(); ++i)
+                totalLength += (route[i] - route[i - 1]).SizeXZ();
+
+            _plan.Resize(static_cast<int>(goals.size()));
+            _planPoints.Resize(static_cast<int>(goals.size()));
+            float runningCost = 0.f;
+            for (int i = 0; i < static_cast<int>(goals.size()); ++i)
+            {
+                const Vector3& p = goals[i];
+                FieldPassing& field = _plan[i];
+                field._x = std::clamp(toIntFloor(p.X() * InvLandGrid), 0, LandRange - 1);
+                field._z = std::clamp(toIntFloor(p.Z() * InvLandGrid), 0, LandRange - 1);
+                field._mode = ((i == 0 && approachRoad) ||
+                    (i == static_cast<int>(goals.size()) - 1 && leaveRoad))
+                    ? FieldPassing::Move : FieldPassing::MoveOnRoad;
+                if (i)
+                    runningCost += (p - goals[i - 1]).SizeXZ() *
+                        veh->GetType()->GetMinCost();
+                field._cost = runningCost;
+                _planPoints[i] = p;
+                _planPoints[i][1] = GLOB_LAND->RoadSurfaceY(p.X(), p.Z());
+            }
+            // An exact editor waypoint can lie just outside the physical
+            // road width; the final few metres are still a legal approach.
+            _planPoints[_planPoints.Size() - 1] = ptEnd;
+
+            _searching = false;
+            _usingWayRoute = true;
+            LOG_DEBUG(AI, "Car road route: {} graph points, {} strategic goals, length {:.0f} m",
+                      route.Size(), goals.size(), totalLength);
+            return true;
+        }
+    }
+
     if (prec == AI::LevelCommands ||
         (ptStart.Distance2(ptEnd) < Square(DIST_MIN_OPER) && !veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeAir)) &&
          !veh->GetType()->IsKindOf(GWorld->Preloaded(VTypeShip))))
@@ -1447,7 +1523,10 @@ int AIPathPlanner::FindBestIndex(Vector3Par pos) const
             planIndex = i;
         }
     }
-    planIndex += 2;
+    // The legacy plan looks two grid cells ahead. Procedural goals are
+    // already spaced about 18 m and may be on opposite sides of a bend;
+    // skipping another goal can cause the car to cut across the corner.
+    planIndex += _usingWayRoute ? 1 : 2;
     saturate(planIndex, 0, _plan.Size() - 1);
     return planIndex;
 }

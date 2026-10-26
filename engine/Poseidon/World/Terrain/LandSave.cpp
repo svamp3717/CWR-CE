@@ -1,6 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/Roads.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/FileServer.hpp>
@@ -259,6 +260,9 @@ int Landscape::LoadData(const char* name, float landGrid)
     LOG_DEBUG(World, "Landscape::LoadData start");
     Log("Load landscape %s", name);
     _name = name; // remmember name
+    // A WRP reload must not reuse the old sidecar or texture-bank references,
+    // even when the Landscape instance and file name happen to be identical.
+    GRoadNet = nullptr;
     LSError ret = LSUnknownError;
     // FIX - allow worlds in banks
     QIFStreamB f;
@@ -269,6 +273,9 @@ int Landscape::LoadData(const char* name, float landGrid)
     }
     else if (LoadOptimized(f, landGrid))
     {
+        // Optimized WRP provides geography but still needs a live road graph,
+        // including optional model-free .ways sidecars.
+        InitGeography();
         ret = LSOK;
     }
     else
@@ -530,6 +537,7 @@ void Landscape::ResampleTerrain(int sampleStepLog)
     {
         GScene->GetShadowCache().Clear();
     }
+    RefreshWayTerrain();
 }
 
 template <class Type>
@@ -950,6 +958,8 @@ void Landscape::SubdivideTerrain(int subdivStepLog)
         GScene->GetShadowCache().Clear();
     }
 
+    RefreshWayTerrain();
+
     auto elapsed = TerrainProfile::Now() - st0;
     // ~3GHz: cycles/3e6 = ms
     RptF("SubdivideTerrain: %.1f ms, grid=%d range=%d", elapsed / 3e6, _terrainRange, _landRange);
@@ -1028,6 +1038,7 @@ bool Landscape::LoadSubdivCache(int targetSubdivLog)
     if (GScene)
         GScene->GetShadowCache().Clear();
 
+    RefreshWayTerrain();
     LOG_DEBUG(Core, "LOAD: SubdivCache HIT from {}", path);
     return true;
 }

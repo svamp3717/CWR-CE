@@ -362,6 +362,7 @@ protected:
 	void DrawForestBorders(int i, int j, float x, float y, float w, float h);
 
 	void DrawRoads(int i, int j);
+	void DrawGeneratedRoads();
 	void DrawGrid();
 
 	void DrawEllipse(Vector3Val position, float a, float b, float angle, PackedColor color);

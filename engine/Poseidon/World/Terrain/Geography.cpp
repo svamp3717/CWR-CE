@@ -100,14 +100,58 @@ static const RStringB& GetRoadString()
 
 // If geography information is already present, detect it and return as fast as possible.
 
+// Mark the same geography flag as legacy road objects. Used by AI terrain
+// costs, vegetation and terrain subdivision; existing WRP flags are preserved.
+void Landscape::StampWayGeography()
+{
+    if (!GRoadNet || !GRoadNet->HasWays())
+        return;
+    const float tolerance = _landGrid * 0.707107f;
+    for (int z = 0; z < _landRange; ++z)
+        for (int x = 0; x < _landRange; ++x)
+        {
+            const float worldX = (x + 0.5f) * _landGrid;
+            const float worldZ = (z + 0.5f) * _landGrid;
+            if (!GRoadNet->WaySurface(worldX, worldZ, tolerance))
+                continue;
+            GeographyInfo& geog = _geography(x, z);
+            geog.u.road = true;
+            geog.u.full = false;
+            if (geog.u.gradient > 5)
+                geog.u.gradient = 5;
+            if (geog.u.howManyObjects > 2)
+                geog.u.howManyObjects = 2;
+        }
+}
+
+// Rebuild generated geometry (and its spatial index) after terrain height
+// edits or resampling, rather than leaving strips at obsolete elevations.
+void Landscape::RefreshWayTerrain()
+{
+    _roadWayGeometryDirty = false;
+    if (!GRoadNet || !GRoadNet->HasWays())
+        return;
+    GRoadNet->RefreshWayHeights(this);
+    // The XY graph and road geography footprint are unchanged.
+}
+
 void Landscape::InitGeography()
 {
-    GRoadNet = new RoadNet;
-    GRoadNet->Build(this);
+    _roadWayGeometryDirty = false;
+    // Editor preview can invoke InitGeography again on the same world while
+    // AI is already present. Replacing RoadNet would invalidate its RoadLink
+    // pointers during mission start. Reuse the graph when the world has not
+    // changed, while still regenerating geography when requested.
+    if (!GRoadNet || !GRoadNet->IsBuiltFor(this))
+    {
+        GRoadNet = new RoadNet;
+        GRoadNet->Build(this);
+    }
 
     // check if randomization etc. is valid
     if (_mountains.Size() > 0)
     {
+        StampWayGeography();
         // all data loaded from file
         // no additional processing required
         return;
@@ -353,6 +397,7 @@ void Landscape::InitGeography()
         }
     }
 
+    StampWayGeography();
     ReplaceObjects(name);
 
     I_AM_ALIVE();

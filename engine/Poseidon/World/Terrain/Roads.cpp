@@ -9,6 +9,15 @@
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Math/MathOpt.hpp>
 #include <Poseidon/Foundation/Memory/MemAlloc.hpp>
+#include <Poseidon/IO/Streams/QBStream.hpp>
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace Poseidon
 {
@@ -31,8 +40,42 @@ RoadLink::RoadLink(Object* object, Vector3* pos, int c) : _object(object), _lock
     }
 }
 
+RoadLink::RoadLink(Vector3Par from, Vector3Par to, float width, Texture* texture)
+    : _locks(0), _nCon(2), _wayHalfWidth(width * 0.5f), _wayTexture(texture)
+{
+    _pos[0] = from;
+    _pos[1] = to;
+    for (int i = 0; i < NCon; ++i)
+        _con[i] = nullptr;
+}
+
+void RoadLink::UpdateWayHeights(Landscape* land)
+{
+    if (!IsWay())
+        return;
+    for (int i = 0; i < _nCon; ++i)
+        _pos[i][1] = land->SurfaceY(_pos[i].X(), _pos[i].Z()) + RoadWaySurfaceOffset;
+}
+
+// Project in the horizontal plane: generated ways follow terrain rather than
+// a model's roadway LOD. This is also used by the collision surface query.
+static float WayDistance2XZ(float x, float z, Vector3Par from, Vector3Par to)
+{
+    const float dx = to.X() - from.X();
+    const float dz = to.Z() - from.Z();
+    const float len2 = dx * dx + dz * dz;
+    if (len2 <= 1e-8f)
+        return std::numeric_limits<float>::max();
+    const float t = std::clamp(((x - from.X()) * dx + (z - from.Z()) * dz) / len2, 0.0f, 1.0f);
+    const float ox = x - from.X() - t * dx;
+    const float oz = z - from.Z() - t * dz;
+    return ox * ox + oz * oz;
+}
+
 bool RoadLink::IsInside(Vector3Val pos, float size) const
 {
+    if (_wayHalfWidth > 0)
+        return WayDistance2XZ(pos.X(), pos.Z(), _pos[0], _pos[1]) <= Square(_wayHalfWidth + floatMax(size, 0));
     Object* obj = _object;
     if (!obj)
     {
@@ -62,7 +105,7 @@ bool RoadLink::IsInside(Vector3Val pos, float size) const
     return minDist2 < Square(size);
 }
 
-inline RoadList& RoadNet::SelectRoadList(float x, float z)
+RoadList& RoadNet::SelectRoadList(float x, float z)
 {
     int xx = toIntFloor(x * InvLandGrid);
     int zz = toIntFloor(z * InvLandGrid);
@@ -97,6 +140,10 @@ RoadNet::~RoadNet() = default;
 
 void RoadNet::Scan(Landscape* land)
 {
+    // Array2D::Dim preserves old elements when dimensions match! A rebuild
+    // otherwise keeps dead/duplicate SRef<RoadLink> objects and cross-links
+    // them to new ways, eventually corrupting AI road traversal.
+    _roads.Clear();
     _roads.Dim(LandRange, LandRange);
     // insert all road objects into the road list
     int x, z;
@@ -301,7 +348,7 @@ void RoadNet::Connect()
                                         for (int ii = 0; ii < sCon; ii++)
                                         {
                                             float dist2 = (sPos[ii] - val).SquareSizeXZ();
-                                            if (dist2 < Square(maxDistCon))
+                                            if (!sRoad->Connections()[ii] && dist2 < Square(maxDistCon))
                                             {
 #if DIAGS
                                                 LOG_DEBUG(World, "Connect {:x}:{} - {:x}:{}", (uintptr_t)road, i,
@@ -347,6 +394,10 @@ void RoadNet::Connect()
             for (int i = 0; i < n; i++)
             {
                 RoadLink* item = list[i];
+                // OSM ways connect only through shared endpoints. Do not
+                // snap nearby parallel lanes or grade-separated crossings.
+                if (item->IsWay())
+                    continue;
                 for (int j = 0; j < item->NConnections(); j++)
                 {
                     if (!item->Connections()[j])
@@ -370,7 +421,7 @@ void RoadNet::Connect()
                                 {
                                     // check connection with all connection points of tItem
                                     RoadLink* tItem = tList[ii];
-                                    if (tItem == item)
+                                    if (tItem->IsWay() || tItem == item)
                                     {
                                         continue;
                                     }
@@ -487,25 +538,27 @@ bool operator<=(RoadNode& a, RoadNode& b)
 
 typedef HeapArray<RoadNode*, MemAllocSS> RoadOpenList;
 
+// Generated ways can create many thousands of road links. Previously every
+// A* successor scanned all visited nodes, giving O(N^2) path lookup cost.
+// AI preview starts navigation immediately, so this could stall badly.
 class RoadNodeContainer : public AutoArray<SRef<RoadNode>>
 {
-  public:
-    RoadNode* Find(RoadLink* link) const;
-};
+    std::unordered_map<RoadLink*, RoadNode*> _visited;
 
-RoadNode* RoadNodeContainer::Find(RoadLink* link) const
-{
-    int i, n = Size();
-    for (i = 0; i < n; i++)
+  public:
+    RoadNode* Find(RoadLink* link) const
     {
-        RoadNode* node = Get(i);
-        if (node->road == link)
-        {
-            return node;
-        }
+        auto it = _visited.find(link);
+        return it == _visited.end() ? nullptr : it->second;
     }
-    return nullptr;
-}
+
+    void AddNode(RoadNode* node)
+    {
+        PoseidonAssert(node && node->road);
+        _visited[node->road] = node;
+        Add(node);
+    }
+};
 
 inline float RoadCost(Vector3Par from, Vector3Par to)
 {
@@ -580,9 +633,9 @@ bool RoadNet::SearchPath(Vector3Par from, Vector3Par to, RoadPathArray& path, fl
                 if (item->IsInside(to, prec))
                 {
                     best = new RoadNode;
-                    container.Add(best);
                     best->parent = nullptr;
                     best->road = item;
+                    container.AddNode(best); // key must be initialized before insertion
                     best->pos = to;                                             // item->PosConnections()[jBest];
                     best->cost = item->GetCenter().Distance(to) * COST_NO_ROAD; // * sqrt(minDist2);
                     best->heur = RoadHeur(best->pos, from);
@@ -606,12 +659,20 @@ bool RoadNet::SearchPath(Vector3Par from, Vector3Par to, RoadPathArray& path, fl
     while (true) // search cycle
     {
         bool ok = openList.HeapRemoveFirst(best);
-        if (!ok || ++iter > MAX_ITER)
+        // A generated way can contain thousands of short segments. Keep the
+        // legacy cap for old maps, scale the budget for polyline networks.
+        const int maxIterations = _waySegments.empty() ? MAX_ITER
+            : std::min(200000, std::max(MAX_ITER, static_cast<int>(_waySegments.size()) * 2));
+        if (!ok || ++iter > maxIterations)
         {
             goto PathNotFound;
         }
 
-        if (best->road->IsInside(from, 0))
+        // Unlike P3D roadway polygons, generated ways represent a
+        // terrain strip. A car may begin just beside the strip; the
+        // caller's precision must apply at BOTH ends of the search.
+        const float startTolerance = best->road->IsWay() ? floatMax(prec, 0.f) : 0.f;
+        if (best->road->IsInside(from, startTolerance))
         {
             // best is the first node of result path
             goto PathFound;
@@ -659,9 +720,9 @@ bool RoadNet::SearchPath(Vector3Par from, Vector3Par to, RoadPathArray& path, fl
             else
             {
                 cur = new RoadNode;
-                container.Add(cur);
                 cur->parent = best;
                 cur->road = item;
+                container.AddNode(cur); // avoid indexing uninitialized road pointers
                 cur->pos = pos;
                 cur->cost = cost;
                 cur->heur = RoadHeur(pos, from);
@@ -706,6 +767,9 @@ PathNotFound:
 #if DIAGS
     LOG_DEBUG(World, "  path not found at {} iters", iter);
 #endif
+    if (!_waySegments.empty())
+        LOG_DEBUG(AI, "Generated road route unavailable from ({:.1f}, {:.1f}) to ({:.1f}, {:.1f}), precision {:.1f}, visited {} links",
+                  from.X(), from.Z(), to.X(), to.Z(), prec, container.Size());
     return false;
 
 PathFound:
@@ -850,9 +914,14 @@ bool RoadNet::IsLocked(Vector3Par pos, float size) const
 void RoadNet::Build(Landscape* land)
 {
     Scan(land);
+    LoadWays(land);
     Connect();
+    ConnectWayJunctions();
     Optimize();
     Compact();
+    _builtForLandscape = land;
+    const char* name = land->GetName();
+    _builtForName = name ? name : "";
 }
 
 SRef<RoadNet> GRoadNet; // global instance

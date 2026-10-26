@@ -27,6 +27,7 @@
 #include <Poseidon/Foundation/Time/Time.hpp>
 #include <cmath>
 #include <utility>
+#include <vector>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Containers/StaticArray.hpp>
@@ -163,6 +164,15 @@ void AILocker::LockPosition(Vector3Val pos, float radius, bool soldier, float si
             for (i = 0; i < roadList.Size(); i++)
             {
                 RoadLink* item = roadList[i];
+                // Legacy P3D road pieces were long enough for one locked
+                // section to represent a blocked road. Procedural links are
+                // only ~2 metres: a parked car would lock several consecutive
+                // links and disconnect the whole road graph, making cars
+                // report their movement orders as unreachable ("Negative").
+                // Terrain-cell locks and vehicle collision avoidance still
+                // handle occupied positions; keep the path graph traversable.
+                if (item->IsWay())
+                    continue;
                 if (item->IsInside(pos, size))
                 {
                     item->Lock();
@@ -2256,6 +2266,77 @@ bool AIUnit::CreateRoadPath(Vector3Val from, Vector3Val to)
     RoadPathArray roadPath; // StaticArray
     static StaticStorage<Vector3> vectorStorage;
     roadPath.SetStorage(vectorStorage.Init(128));
+
+    // Generated ways are a centerline graph. The legacy SearchPath call
+    // allows the driver's physical position/waypoint to be several metres
+    // to one side and can then fail (or choose an unrelated nearby road),
+    // silently falling back to terrain A*. For an explicitly procedural
+    // strategic route, project entry/exit onto the SAME way graph and
+    // retain every routed connection as an operative steering point.
+    if (_planner && _planner->IsUsingWayRoute() && GRoadNet->HasWays())
+    {
+        // Local goals in the 18 m strategic plan are *not* mission
+        // destinations. If Path::End stops at one of these intermediate
+        // goals, LeaderPathPilot reports StepCompleted early. Search to the
+        // actual final waypoint instead, preserving road bends end-to-end.
+        Vector3 finalTarget = to;
+        const int nPlan = _planner->GetPlanSize();
+        if (nPlan > 0)
+            _planner->GetPlanPosition(nPlan - 1, finalTarget);
+        Vector3 entry, exit;
+        if (GRoadNet->GetNearestWayPoint(from, 12.f, entry) &&
+            GRoadNet->GetNearestWayPoint(finalTarget, 35.f, exit) &&
+            (entry - exit).SquareSizeXZ() > Square(3.f))
+        {
+            roadPath.Clear();
+            if (GRoadNet->SearchPath(entry, exit, roadPath, 1.f) && roadPath.Size() >= 2)
+            {
+                // Six-metre steering points retain curved roads without
+                // forcing the pilot to scan thousands of 2 m links every
+                // simulation tick. Strategic sampling remains 18 m.
+                std::vector<Vector3> sampled;
+                RoadNet::SampleWayRoute(roadPath, sampled, 6.f);
+                std::vector<Vector3> drive;
+                drive.reserve(sampled.size() + 4);
+                auto appendPoint = [&drive](Vector3Val p)
+                {
+                    if (drive.empty() || (drive.back() - p).SquareSizeXZ() > Square(0.2f))
+                        drive.push_back(p);
+                };
+                appendPoint(from);
+                appendPoint(entry);
+                for (const Vector3& point : sampled)
+                    appendPoint(point);
+                appendPoint(exit);
+                appendPoint(finalTarget);
+                if (drive.size() >= 2)
+                {
+                    veh->PerformLock();
+                    _path.Resize(static_cast<int>(drive.size()));
+                    int maxIndex = -1;
+                    for (int i = 0; i < static_cast<int>(drive.size()); ++i)
+                    {
+                        Vector3 p = GLandscape->PointOnSurface(drive[i].X(), combatHeight, drive[i].Z());
+                        _path[i]._pos = p;
+                        _path[i]._cost = 0.f;
+                        if (maxIndex < 0 && i > 1 &&
+                            (p - from).SquareSizeXZ() >= Square(DIST_MAX_OPER))
+                            maxIndex = i;
+                    }
+                    veh->FillPathCost(_path);
+                    _path.SetOperIndex(1);
+                    _path.SetMaxIndex(maxIndex < 0 || _lastPlan
+                        ? _path.Size() : maxIndex);
+                    _path.SetOnRoad(true);
+                    LOG_DEBUG(AI, "{}: following procedural way centerline, {} steering points",
+                              (const char*)GetDebugName(), drive.size());
+                    return true;
+                }
+            }
+            LOG_DEBUG(AI, "{}: local procedural road path failed ({:.1f},{:.1f}) to ({:.1f},{:.1f})",
+                      (const char*)GetDebugName(), entry.X(), entry.Z(), exit.X(), exit.Z());
+        }
+    }
 
     if (!GRoadNet->SearchPath(from, to, roadPath, 1.25 * precision))
     {

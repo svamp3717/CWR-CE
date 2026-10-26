@@ -1,6 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/Roads.hpp>
 #include <stdlib.h>
 #include <cmath>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -597,6 +598,17 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
         else
         {
             surfaceY = SurfaceY(pos[0], pos[2], &dX, &dZ, &texture);
+        }
+        // Ordinary wheel/track contacts use GroundCollision rather than
+        // RoadSurfaceY. Replace terrain collision by the generated road
+        // surface AND its donor's roadway texture here. Otherwise the
+        // vehicle still uses the grass roughness/dust/sound parameters.
+        Texture* wayTexture = nullptr;
+        if (GRoadNet && GRoadNet->WaySurface(pos.X(), pos.Z(), 0.f, &wayTexture))
+        {
+            surfaceY = SurfaceY(pos.X(), pos.Z(), &dX, &dZ, &texture) + RoadWaySurfaceOffset;
+            texture = wayTexture;
+            bump = 0.f; // no grassy height/noise on a paved road
         }
         float underLevel = surfaceY + above - pos[1];
         if (surfaceY < _seaLevelWave)

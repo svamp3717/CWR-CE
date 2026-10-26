@@ -962,6 +962,9 @@ void CStaticMap::DrawBackground()
                     y += yStep;
                 }
             }
+            // Vector roads stay visible even at map scales where scanning
+            // hundreds of thousands of legacy P3D objects is disabled.
+            DrawGeneratedRoads();
             if (ptsLand >= ptsPerSquareObj)
             {
                 // other objects — stride coarsens at zoom-out, where the icons are
@@ -1795,6 +1798,51 @@ void CStaticMap::DrawForestBorders(int i, int j, float x, float y, float w, floa
                 }
             }
         }
+    }
+}
+
+void CStaticMap::DrawGeneratedRoads()
+{
+    if (!GRoadNet || !GRoadNet->HasWays())
+        return;
+
+    // Cull by the visible world-space map rectangle before transforming:
+    // this is important on worlds with tens of thousands of way segments.
+    const Point3 topLeft = ScreenToWorld(DrawCoord(_x, _y));
+    const Point3 bottomRight = ScreenToWorld(DrawCoord(_x + _w, _y + _h));
+    const float minX = floatMin(topLeft.X(), bottomRight.X());
+    const float maxX = floatMax(topLeft.X(), bottomRight.X());
+    const float minZ = floatMin(topLeft.Z(), bottomRight.Z());
+    const float maxZ = floatMax(topLeft.Z(), bottomRight.Z());
+
+    for (const RoadWayMapSegment& road : GRoadNet->WayMapSegments())
+    {
+        const float halfWidth = road.width * 0.5f;
+        if (floatMax(road.from.X(), road.to.X()) + halfWidth < minX ||
+            floatMin(road.from.X(), road.to.X()) - halfWidth > maxX ||
+            floatMax(road.from.Z(), road.to.Z()) + halfWidth < minZ ||
+            floatMin(road.from.Z(), road.to.Z()) - halfWidth > maxZ)
+            continue;
+        const float dx = road.to.X() - road.from.X();
+        const float dz = road.to.Z() - road.from.Z();
+        const float length = sqrt(dx * dx + dz * dz);
+        if (length < 0.001f)
+            continue;
+        const Vector3 offset(-dz * halfWidth / length, 0, dx * halfWidth / length);
+        const DrawCoord leftFrom = WorldToScreen(road.from + offset);
+        const DrawCoord leftTo = WorldToScreen(road.to + offset);
+        const DrawCoord rightFrom = WorldToScreen(road.from - offset);
+        const DrawCoord rightTo = WorldToScreen(road.to - offset);
+
+        // Match the two boundary lines used for P3D roads and their map color.
+        GLOB_ENGINE->DrawLine(
+            Line2DPixel(leftFrom.x * _wScreen, leftFrom.y * _hScreen,
+                        leftTo.x * _wScreen, leftTo.y * _hScreen),
+            _colorRoads, _colorRoads, _clipRect);
+        GLOB_ENGINE->DrawLine(
+            Line2DPixel(rightFrom.x * _wScreen, rightFrom.y * _hScreen,
+                        rightTo.x * _wScreen, rightTo.y * _hScreen),
+            _colorRoads, _colorRoads, _clipRect);
     }
 }
 

@@ -1509,6 +1509,13 @@ void AIUnit::OnStrategicPathFound()
 
 void AIUnit::OnStrategicPathNotFound(bool update)
 {
+    // Editor units saying "Negative" usually reflects a strategic-route
+    // failure. Keep a usable diagnostic when generated roads are active,
+    // so unreachable destinations can be distinguished from AI ordering.
+    if (!update && GRoadNet && GRoadNet->HasWays())
+        LOG_WARN(AI, "AI route rejected for {} from ({:.1f}, {:.1f}) to ({:.1f}, {:.1f}) planningMode={}",
+                 (const char*)GetDebugName(), Position().X(), Position().Z(),
+                 _plannedPosition.X(), _plannedPosition.Z(), static_cast<int>(_planningMode));
     _waitWithPlan = Glob.time + 10.0F;
 
     if (update)
@@ -1726,9 +1733,21 @@ void AIUnit::OperPath(ThinkImportance prec)
 
             saturateMin(planIndex, _planner->GetPlanSize() - 1);
 
+            // DirectNormal / DirectExact copy strategic points as straight
+            // steering legs, bypassing RoadNet::SearchPath. On generated
+            // roads this cuts corners and drives across fields. Even at
+            // strategic think importance, use the normal operative road A*
+            // whenever the strategic target is marked as on-road.
+            // Do not change P3D road AI just because this map also has ways.
+            // Only graph-derived procedural plans use the new steering.
+            // The final waypoint may be just off the road: its field mode
+            // is Move, but the whole route still needs procedural operative
+            // steering until the road exit. Do not revert to DirectExact.
+            const bool followWays = _planner->IsUsingWayRoute();
+
             if (_lastPlan)
             {
-                if (prec <= LevelFastOperative)
+                if (followWays || prec <= LevelFastOperative)
                 {
                     SetMode(AIUnit::Exact);
                 }
@@ -1748,7 +1767,7 @@ void AIUnit::OperPath(ThinkImportance prec)
             }
             else
             {
-                if (prec <= LevelFastOperative)
+                if (followWays || prec <= LevelFastOperative)
                 {
                     SetMode(AIUnit::Normal);
                 }
@@ -1872,7 +1891,13 @@ bool AIUnit::CreateOperativePath()
                 break;
             }
         }
-        if (index >= 0)
+        // A normal P3D strategic plan historically appends its remaining
+        // cells as straight lookahead hints. With a procedural centerline
+        // these are not navigable route points: PathPilot looks ahead along
+        // the appended straight chords and steers across fields. For way
+        // routes keep ONLY the fully connected operative RoadNet result;
+        // replan at the next strategic goal instead.
+        if (index >= 0 && !_planner->IsUsingWayRoute())
         {
             int j = _path.Size() - 1;
             float lastCost = _path[j]._cost;

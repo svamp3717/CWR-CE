@@ -451,6 +451,7 @@ class Landscape: public SerializeClass
 
 	// re-upload _data to the GPU height texture on the next Draw
 	bool _heightmapDirty = true;
+	bool _roadWayGeometryDirty = false; // defer mesh regeneration after terrain edits
 
 	float GetData( int x, int z ) const {return RawToHeight(_data(x,z));}
 	void SetData( int x, int z, float data )
@@ -571,6 +572,8 @@ class Landscape: public SerializeClass
 
 	// init geography information
 	void InitGeography();
+	void StampWayGeography();
+	void RefreshWayTerrain(); // regenerate road meshes when terrain elevations change
 	void InitMountains();
 	void InitSoundMap();
 	void InitDynSounds( const ParamEntry &entry );
@@ -710,6 +713,7 @@ class Landscape: public SerializeClass
 		const LandBegEnd &bigRect, Scene &scene, const GroundLayerInfo &layer
 	);
 
+	void DrawRoadWays(const LandBegEnd& bigRect, Scene& scene);
 	void PrepareInstancedTerrain();
 	void DrawGroundInstanced(const LandBegEnd &bigRect, Scene &scene);
 
