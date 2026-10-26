@@ -152,10 +152,11 @@ TEST_CASE("Donor road faces cannot inherit hidden or water rendering", "[World][
     REQUIRE((flags & IsWater) == 0);
 }
 
-TEST_CASE("Procedural asphalt and donor overlay faces point upward", "[World][RoadWays][Rendering]")
+TEST_CASE("Generated road faces preserve renderer clockwise front winding", "[World][RoadWays][Rendering]")
 {
-    // Shape::GetNormal uses the legacy p2 cross p1 ordering. A reversed
-    // surface can be culled from above or lit as its dark underside.
+    // The graphics pipeline uses FrontFaceMode::CW, not the sign of
+    // Poly::GetNormal (which calculates p2 cross p1). Reversing these
+    // indices made every way invisible due to back-face culling.
     Shape mesh;
     mesh.Reserve(4);
     mesh.ReserveFaces(2);
@@ -169,10 +170,21 @@ TEST_CASE("Procedural asphalt and donor overlay faces point upward", "[World][Ro
     face.Init();
     RoadNet::AddWayQuad(mesh, face, 0, 2);
     REQUIRE(mesh.NFaces() == 2);
+    REQUIRE(mesh.FaceIndexed(0).GetVertex(0) == 0);
+    REQUIRE(mesh.FaceIndexed(0).GetVertex(1) == 2);
+    REQUIRE(mesh.FaceIndexed(0).GetVertex(2) == 1);
+    REQUIRE(mesh.FaceIndexed(1).GetVertex(0) == 1);
+    REQUIRE(mesh.FaceIndexed(1).GetVertex(1) == 2);
+    REQUIRE(mesh.FaceIndexed(1).GetVertex(2) == 3);
+
     for (int i = 0; i < mesh.NFaces(); ++i)
     {
         const Poly& triangle = mesh.FaceIndexed(i);
-        REQUIRE(triangle.GetNormal(mesh).Y() > 0.f);
-        REQUIRE(triangle.GetAreaTop(mesh) == Catch::Approx(2.f));
+        // Poly::GetNormal has the reverse convention to the render frontend,
+        // so this negative result is expected for correctly visible faces.
+        REQUIRE(triangle.GetNormal(mesh).Y() < 0.f);
+        // Lighting still uses deliberately upward-facing per-vertex normals.
+        for (int v = 0; v < triangle.N(); ++v)
+            REQUIRE(mesh.Norm(triangle.GetVertex(v)).Y() > 0.f);
     }
 }
