@@ -29,6 +29,44 @@ namespace Poseidon
 {
 using namespace Foundation;
 
+RoadLink::RoadLink(Vector3Par from, Vector3Par to, float width, Texture* texture)
+    : _locks(0), _nCon(2), _wayHalfWidth(width * 0.5f), _wayTexture(texture)
+{
+    _pos[0] = from;
+    _pos[1] = to;
+    for (int i = 0; i < NCon; ++i)
+        _con[i] = nullptr;
+}
+
+void RoadLink::UpdateWayHeights(Landscape* land)
+{
+    if (!IsWay())
+        return;
+    for (int i = 0; i < _nCon; ++i)
+        _pos[i][1] = land->SurfaceY(_pos[i].X(), _pos[i].Z()) + RoadWaySurfaceOffset;
+}
+
+// Project in the horizontal plane: generated ways follow terrain rather than
+// a model's roadway LOD. This is also used by the collision surface query.
+static float WayDistance2XZ(float x, float z, Vector3Par from, Vector3Par to)
+{
+    const float dx = to.X() - from.X();
+    const float dz = to.Z() - from.Z();
+    const float len2 = dx * dx + dz * dz;
+    if (len2 <= 1e-8f)
+        return std::numeric_limits<float>::max();
+    const float t = std::clamp(((x - from.X()) * dx + (z - from.Z()) * dz) / len2, 0.0f, 1.0f);
+    const float ox = x - from.X() - t * dx;
+    const float oz = z - from.Z() - t * dz;
+    return ox * ox + oz * oz;
+}
+
+bool RoadLink::IsWayInside(Vector3Val pos, float size) const
+{
+    return WayDistance2XZ(pos.X(), pos.Z(), _pos[0], _pos[1]) <=
+        Square(_wayHalfWidth + floatMax(size, 0));
+}
+
 Vector3 RoadNet::WayLitNormal(Vector3Par terrainNormal, bool donorNormalDown)
 {
     Vector3 normal = terrainNormal;

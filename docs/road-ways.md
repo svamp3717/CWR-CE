@@ -178,7 +178,8 @@ The isolated integration branch keeps new OSM-style parsing, tessellation,
 donor-texture processing, road-junction wiring, and terrain-height refresh in
 `engine/Poseidon/World/Terrain/RoadWays.cpp`. Original `Roads.cpp`
 contains only the small hooks needed to connect the existing P3D network with
-the generated network. The project CMake configuration discovers this new
+the generated network. The way-specific RoadLink construction, horizontal
+distance test, and terrain-height refresh also live in `RoadWays.cpp`. The project CMake configuration discovers this new
 source through `GLOB_RECURSE CONFIGURE_DEPENDS`.
 
 Existing worlds with no `.ways` file retain their original P3D road system.

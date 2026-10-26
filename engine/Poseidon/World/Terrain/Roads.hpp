@@ -29,6 +29,7 @@ class RoadLink
 	OLink<Object> _object;
 	float _wayHalfWidth = 0; // positive for generated way segments
 	Texture *_wayTexture = nullptr;
+	bool IsWayInside(Vector3Val pos, float size) const; // implemented by generated-way module
 
 	public:
 	RoadLink( Object *object, Vector3 *pos, int c );
