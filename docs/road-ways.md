@@ -35,6 +35,14 @@ The third field supports two backwards-compatible forms:
   rendered texture, and its roadway LOD supplies the road-contact texture
   (roughness, dust, and sound environment). If there is no roadway texture,
   the visible texture is used for both.
+* For the **three original CWA road skins** `o\\road\\sil_new.paa`,
+  `o\\road\\ces_hned.paa`, and `o\\road\\asf_new.paa`, the engine also
+  finds the matching stock `sil25`, `ces25`, or `asf25` P3D when a
+  texture-only way is loaded. The explicitly requested texture remains
+  authoritative; the P3D contributes native vertex-lighting hints,
+  downward-normal orientation, surface flags and UVs **only when the donor
+  uses that same texture**. Existing `.ways` files need not be rewritten.
+  Custom texture paths retain their earlier fallback.
 * `data\\YOUR_ROAD.pac` / `.paa`: use the explicitly provided texture for
   both visible road geometry and ground-contact effects. Older `.ways`
   files using texture paths still work, but their default 0–1 UV mapping
@@ -74,6 +82,14 @@ choose widths and map road texture paths, and write the node/way records.
   splitting road rendering across two draw passes was reverted because it
   introduced clipping regressions. Repeated donor faces using the same
   texture are not blended over themselves.
+  The generated road mesh also borrows the loaded donor's **decoded**
+  per-vertex ClipFlags and normal orientation. Original stock road P3Ds have
+  negative-Y visual vertex normals even though the renderer draws their
+  clockwise faces from above. Previously every generated ribbon used positive-Y
+  normals and generic ClipAll vertex hints, changing its lighting and colour.
+  This correction does not flip polygon winding or affect wheel physics.
+  Source ODOL and MLOD bit flags have different encodings; raw flag integers
+  must not be copied directly into runtime mesh flags.
   The generated sections also resolve the original
   `CfgTextureToMaterial` mapping and retain material references through
   editor-preview transitions. The generator reconstructs donor UV tiling
@@ -139,3 +155,19 @@ choose widths and map road texture paths, and write the node/way records.
 * Generated ribbons use the model/material Shape renderer;
   very large road datasets will benefit from spatial batching and a dedicated
   instanced rendering path.
+
+## Worldgen compatibility
+
+The original `<world>.ways` syntax and loading behavior are unchanged.
+**No Worldgen update or map regeneration is required** to test the stock-skin
+lighting fix; rebuild CWR-CE and use the same existing PBO. If Worldgen is
+later enhanced to emit `.ways` directly or supply custom donor mappings,
+that would be a separate optional generator feature. Current Worldgen's
+WRP/P3D object workflow is independent of engine-side `.ways` rendering.
+
+At world load, each unique road source is logged as `Generated road material`,
+including `normalDown`, `vertexClip`, `donorFlags`, and `wayFlags`.
+For recognized stock skin paths with an available matching donor P3D,
+`vertexStyle=true` and `normalDown=true` are expected. If they are false,
+inspect the model bank and asset path resolution before changing UV or lighting
+rules again.
