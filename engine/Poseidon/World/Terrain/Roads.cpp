@@ -138,6 +138,17 @@ inline RoadList& RoadNet::SelectRoadList(float x, float z)
 RoadNet::RoadNet() = default;
 RoadNet::~RoadNet() = default;
 
+Vector3 RoadNet::WayLitNormal(Vector3Par terrainNormal, bool donorNormalDown)
+{
+    Vector3 normal = terrainNormal;
+    // The native stock CWA o\\road visual LOD normals point *downward*.
+    // The terrain geometric normal is used solely to follow the slope;
+    // its lighting hemisphere must agree with the original road P3D.
+    if (donorNormalDown)
+        normal *= -1.f;
+    return normal;
+}
+
 int RoadNet::WayFaceFlags(int donorFlags, bool donorProvided, bool blendTexture)
 {
     if (donorProvided)
@@ -718,8 +729,8 @@ void AppendDonorBandMeshes(std::vector<std::unique_ptr<Shape>>& meshes, Landscap
                     RoadWaySurfaceOffset + 0.006f;
                 Vector3 normal(-dx, 1, -dz);
                 normal.Normalize();
-                if (band.appearance.hasVertexStyle && band.appearance.normalDown)
-                    normal *= -1.f; // match native P3D surface light response
+                normal = RoadNet::WayLitNormal(
+                    normal, band.appearance.hasVertexStyle && band.appearance.normalDown);
                 const float donorX = band.appearance.xMin +
                     (band.appearance.xMax - band.appearance.xMin) * t;
                 const float donorZ = band.appearance.zMin + uvDistance[i];
@@ -998,8 +1009,8 @@ void RoadNet::LoadWays(Landscape* land)
                     pos[1] = land->SurfaceY(pos.X(), pos.Z(), &dx, &dz) + RoadWaySurfaceOffset;
                     Vector3 normal(-dx, 1, -dz);
                     normal.Normalize();
-                    if (visual.hasVertexStyle && visual.normalDown)
-                        normal *= -1.f; // stock o\\road road models use -Y normals
+                    normal = WayLitNormal(
+                        normal, visual.hasVertexStyle && visual.normalDown);
                     float uu = u, vv = uvDistance[i] / way.width;
                     if (visual.hasUV)
                     {
