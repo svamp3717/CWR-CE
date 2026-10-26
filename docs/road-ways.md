@@ -49,10 +49,13 @@ choose widths and map road texture paths, and write the node/way records.
 
 * Each way is subdivided into terrain-following sections approximately
   2 metres long and triangulated across its width in 1.5-metre strips.
-  Both the base asphalt and overlay ribbons use upward-facing polygon
-  winding, consistent with the engine's legacy `PolyVertices::GetNormal`
-  convention. The initial generated ribbons had reversed face winding,
-  causing culling/clipping and potentially incorrect lighting.
+  Both asphalt and overlay ribbons retain the original clockwise
+  front-face winding required by `RenderPassDescriptor::FrontFaceMode::CW`.
+  The legacy `PolyVertices::GetNormal` helper calculates its geometric
+  normal with the opposite cross-product order, so it must not be used
+  as the front-face test. Changing road polygons to make that helper
+  return +Y made every generated way invisible. Lighting normals are
+  still independently sampled upward from terrain.
   The geometry samples the terrain at every vertex with a 7.5 cm clearance,
   rather than connecting two floating or buried edges. Long ways are split
   into render chunks that fit legacy vertex-index limits.
