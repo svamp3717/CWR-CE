@@ -162,20 +162,21 @@ int RoadNet::WayFaceFlags(int donorFlags, bool donorProvided, bool blendTexture)
     return NoClamp | NoZWrite | (blendTexture ? IsAlpha : 0);
 }
 
-// Both the asphalt and narrow donor overlay bands use the same winding.
-// PolyVertices::GetNormal computes (p2-p0) x (p1-p0); because increasing
-// the row follows the way and increasing the column crosses to its right,
-// winding must be reversed relative to the standard (p1-p0) x (p2-p0).
+// Renderer front faces are clockwise (RenderPassDescriptor::FrontFaceMode::CW).
+// This is deliberately the SAME winding used by the originally visible road
+// ribbons. PolyVertices::GetNormal uses the opposite cross-product order;
+// that geometric helper is not a test of GPU front-face visibility. Vertex
+// lighting normals are explicitly upward-facing when ribbons are built.
 void RoadNet::AddWayQuad(Shape& mesh, Poly& face, int previousRow, int nextRow)
 {
     face.SetN(3);
     face.Set(0, previousRow);
-    face.Set(1, previousRow + 1);
-    face.Set(2, nextRow);
+    face.Set(1, nextRow);
+    face.Set(2, previousRow + 1);
     mesh.AddFace(face);
     face.Set(0, previousRow + 1);
-    face.Set(1, nextRow + 1);
-    face.Set(2, nextRow);
+    face.Set(1, nextRow);
+    face.Set(2, nextRow + 1);
     mesh.AddFace(face);
 }
 
