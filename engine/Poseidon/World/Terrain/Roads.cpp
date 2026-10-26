@@ -1930,7 +1930,11 @@ void RoadNet::RefreshWayHeights(Landscape* land)
             p[1] = land->SurfaceY(p.X(), p.Z(), &dX, &dZ) + RoadWaySurfaceOffset;
             Vector3 n(-dX, 1, -dZ);
             n.Normalize();
-            mesh->SetNorm(i) = n;
+            // Preserve the selected donor P3D's -Y lighting hemisphere
+            // through terrain resampling/editor preview. Previously this
+            // refresh silently replaced every donor normal with +Y.
+            const bool donorNormalDown = mesh->Norm(i).Y() < 0.f;
+            mesh->SetNorm(i) = WayLitNormal(n, donorNormalDown);
         }
         mesh->CalculateMinMax();
         mesh->InvalidateBuffer();
