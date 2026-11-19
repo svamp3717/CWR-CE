@@ -17,6 +17,7 @@
 #include <Poseidon/Foundation/Math/MathOpt.hpp>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <sstream>
@@ -606,6 +607,10 @@ void RoadNet::LoadWays(Landscape* land)
 {
     _waySegments.clear();
     _wayMapSegments.clear();
+    _wayLinks.clear();
+    _wayMeshIndex.Clear();
+    _wayMapIndex.Clear();
+    _waySurfaceIndex.Clear();
     _wayMeshes.clear();
     _wayMaterials.clear();
     const char* name = land->GetName();
@@ -664,9 +669,85 @@ void RoadNet::LoadWays(Landscape* land)
         donorCache.emplace(name, loaded);
         return ptr;
     };
+    struct ResolvedWayAppearance
+    {
+        Ref<Texture> texture, surfaceTexture;
+        RoadDonorAppearance visual;
+        std::vector<RoadDonorBand> bands;
+        int donorSpecial = 0;
+        bool hasDonorRenderStyle = false;
+    };
+    std::unordered_map<std::string, ResolvedWayAppearance> appearanceCache;
+    auto resolveAppearance = [&](const std::string& source) -> const ResolvedWayAppearance&
+    {
+        auto [it, inserted] = appearanceCache.try_emplace(source);
+        auto& appearance = it->second;
+        if (!inserted)
+            return appearance;
+        auto& texture = appearance.texture;
+        auto& surfaceTexture = appearance.surfaceTexture;
+        auto& visual = appearance.visual;
+        auto& bands = appearance.bands;
+        auto& donorSpecial = appearance.donorSpecial;
+        auto& hasDonorRenderStyle = appearance.hasDonorRenderStyle;
+        if (IsDonorName(source))
+        {
+            const std::string donorPath = source.compare(0, 6, "donor=") == 0
+                ? source.substr(6) : source;
+            LODShapeWithShadow* donor = findDonor(donorPath);
+            if (donor)
+            {
+                // The top visual face supplies the exact road appearance.
+                // The donor roadway LOD supplies ground contact properties.
+                if (donor->NLevels() > 0)
+                {
+                    visual = FindDonorTopFace(donor->LevelOpaque(0));
+                    texture = visual.texture;
+                    donorSpecial = visual.special;
+                    hasDonorRenderStyle = visual.hasVertexStyle;
+                    bands = FindDonorBands(donor->LevelOpaque(0), texture);
+                }
+                surfaceTexture = FindDonorTopFace(donor->RoadwayLevel()).texture;
+            }
+            if (!surfaceTexture)
+                surfaceTexture = texture;
+            if (!texture)
+                texture = surfaceTexture;
+        }
+        else
+        {
+            texture = GlobLoadTexture(source.c_str());
+            surfaceTexture = texture;
+            // Existing texture-only WRP/PBOs get the stock surface lighting
+            // style automatically, but the explicit texture remains the
+            // rendered and wheel-contact texture.
+            const char* stockPath = StockDonorForRoadTexture(source);
+            if (stockPath && texture)
+            {
+                LODShapeWithShadow* donor = findDonor(stockPath);
+                if (donor && donor->NLevels() > 0)
+                {
+                    RoadDonorAppearance stock = FindDonorTopFace(donor->LevelOpaque(0));
+                    // Only reuse UVs/materials when the P3D actually uses
+                    // this exact skin; avoid incorrect projections if a mod
+                    // has replaced the stock donor with different artwork.
+                    if (stock.texture == texture && stock.hasVertexStyle)
+                    {
+                        visual = stock;
+                        donorSpecial = stock.special;
+                        hasDonorRenderStyle = true;
+                    }
+                }
+            }
+        }
+        if (!texture || !surfaceTexture)
+            LOG_WARN(World, "Skipping road ways with missing donor/texture: {}", source);
+        return appearance;
+    };
     for (const ParsedWay& way : ways)
     {
         std::vector<Vector3> points;
+        points.reserve(way.nodes.size());
         bool valid = true;
         for (long long nodeId : way.nodes)
         {
@@ -710,7 +791,11 @@ void RoadNet::LoadWays(Landscape* land)
             for (int i = 1; i <= steps; ++i)
             {
                 const float t = static_cast<float>(i) / steps;
-                points.emplace_back(from.X() + dx * t, 0, from.Z() + dz * t);
+                // Preserve exact source vertices at every way junction.
+                if (i == steps)
+                    points.push_back(to);
+                else
+                    points.emplace_back(from.X() + dx * t, 0, from.Z() + dz * t);
             }
         }
         if (!valid || points.size() < 2)
@@ -719,67 +804,15 @@ void RoadNet::LoadWays(Landscape* land)
             continue;
         }
 
-        Ref<Texture> texture;
-        Ref<Texture> surfaceTexture;
-        RoadDonorAppearance visual;
-        std::vector<RoadDonorBand> bands;
-        int donorSpecial = 0;
-        bool hasDonorRenderStyle = false;
-        if (IsDonorName(way.texture))
-        {
-            const std::string donorPath = way.texture.compare(0, 6, "donor=") == 0
-                ? way.texture.substr(6) : way.texture;
-            LODShapeWithShadow* donor = findDonor(donorPath);
-            if (donor)
-            {
-                // The top visual face supplies the exact road appearance.
-                // The donor roadway LOD supplies ground contact properties.
-                if (donor->NLevels() > 0)
-                {
-                    visual = FindDonorTopFace(donor->LevelOpaque(0));
-                    texture = visual.texture;
-                    donorSpecial = visual.special;
-                    hasDonorRenderStyle = visual.hasVertexStyle;
-                    bands = FindDonorBands(donor->LevelOpaque(0), texture);
-                }
-                surfaceTexture = FindDonorTopFace(donor->RoadwayLevel()).texture;
-            }
-            if (!surfaceTexture)
-                surfaceTexture = texture;
-            if (!texture)
-                texture = surfaceTexture;
-        }
-        else
-        {
-            texture = GlobLoadTexture(way.texture.c_str());
-            surfaceTexture = texture;
-            // Existing texture-only WRP/PBOs get the stock surface lighting
-            // style automatically, but the explicit texture remains the
-            // rendered and wheel-contact texture.
-            const char* stockPath = StockDonorForRoadTexture(way.texture);
-            if (stockPath && texture)
-            {
-                LODShapeWithShadow* donor = findDonor(stockPath);
-                if (donor && donor->NLevels() > 0)
-                {
-                    RoadDonorAppearance stock = FindDonorTopFace(donor->LevelOpaque(0));
-                    // Only reuse UVs/materials when the P3D actually uses
-                    // this exact skin; avoid incorrect projections if a mod
-                    // has replaced the stock donor with different artwork.
-                    if (stock.texture == texture && stock.hasVertexStyle)
-                    {
-                        visual = stock;
-                        donorSpecial = stock.special;
-                        hasDonorRenderStyle = true;
-                    }
-                }
-            }
-        }
+        const auto& appearance = resolveAppearance(way.texture);
+        const auto& texture = appearance.texture;
+        const auto& surfaceTexture = appearance.surfaceTexture;
+        const auto& visual = appearance.visual;
+        const auto& bands = appearance.bands;
+        const int donorSpecial = appearance.donorSpecial;
+        const bool hasDonorRenderStyle = appearance.hasDonorRenderStyle;
         if (!texture || !surfaceTexture)
-        {
-            LOG_WARN(World, "Skipping road way with missing donor/texture: {}", way.texture);
             continue;
-        }
         if (reportedMaterials.insert(way.texture).second)
         {
             if (!IsDonorName(way.texture) && StockDonorForRoadTexture(way.texture) &&
@@ -895,15 +928,26 @@ void RoadNet::LoadWays(Landscape* land)
         for (const RoadDonorBand& band : bands)
             AppendDonorBandMeshes(_wayMeshes, land, points, uvDistance, way.width, band);
 
+        // Consecutive subdivisions of the same original way are already
+        // connected by construction. Do not search for their neighbours.
+        RoadLink* previous = nullptr;
+        Vector3 from = points.front();
+        from[1] = land->SurfaceY(from.X(), from.Z()) + RoadWaySurfaceOffset;
         for (size_t i = 1; i < points.size(); ++i)
         {
-            Vector3 from = points[i-1], to = points[i];
-            from[1] = land->SurfaceY(from.X(), from.Z()) + RoadWaySurfaceOffset;
+            Vector3 to = points[i];
             to[1] = land->SurfaceY(to.X(), to.Z()) + RoadWaySurfaceOffset;
-            RoadWaySegment segment{from, to, way.width, texture, surfaceTexture};
-            _waySegments.push_back(segment);
-            SelectRoadList((from.X() + to.X()) * 0.5f, (from.Z() + to.Z()) * 0.5f)
-                .Add(new RoadLink(from, to, way.width, surfaceTexture));
+            _waySegments.push_back({from, to, way.width, texture, surfaceTexture});
+            auto* link = new RoadLink(from, to, way.width, surfaceTexture);
+            SelectRoadList((from.X() + to.X()) * 0.5f, (from.Z() + to.Z()) * 0.5f).Add(link);
+            _wayLinks.push_back(link);
+            if (previous)
+            {
+                previous->SetConnection(1, link);
+                link->SetConnection(0, previous);
+            }
+            previous = link;
+            from = to;
         }
     }
     // Shape::FindSections leaves the surface material unset on generated
@@ -911,11 +955,16 @@ void RoadNet::LoadWays(Landscape* land)
     // ShapeSection::SerializeBin. Apply the identical mapping explicitly.
     // Keep strong references: the material cache can clear on editor preview.
     std::unordered_set<TexMaterial*> retained;
+    std::unordered_map<Texture*, TexMaterial*> materialCache;
     for (auto& mesh : _wayMeshes)
         for (int i = 0; i < mesh->NSections(); ++i)
         {
             ShapeSection& section = mesh->GetSection(i);
-            TexMaterial* material = GTexMaterialBank.TextureToMaterial(section.properties.GetTexture());
+            Texture* sectionTexture = section.properties.GetTexture();
+            auto [it, inserted] = materialCache.try_emplace(sectionTexture, nullptr);
+            if (inserted)
+                it->second = GTexMaterialBank.TextureToMaterial(sectionTexture);
+            TexMaterial* material = it->second;
             section.surfMat = material;
             if (material && retained.insert(material).second)
                 _wayMaterials.emplace_back(material);
@@ -924,90 +973,157 @@ void RoadNet::LoadWays(Landscape* land)
     LOG_DEBUG(World, "Loaded {} generated road way segments from {}", _waySegments.size(), path);
 }
 
+namespace
+{
+RoadWayBounds LinkBounds(Vector3Par from, Vector3Par to, float padding)
+{
+    return {std::min(from.X(), to.X()) - padding,
+            std::min(from.Z(), to.Z()) - padding,
+            std::max(from.X(), to.X()) + padding,
+            std::max(from.Z(), to.Z()) + padding};
+}
+
+// Keep the old RoadList scan order for coincident surfaces. This matters
+// where different road material ribbons overlap at a junction.
+std::pair<int, int> WayLinkCell(const RoadLink* link)
+{
+    // SelectRoadList inserted the link by its two original endpoints,
+    // not the average of any additional junction slots.
+    const auto* pos = link->PosConnections();
+    const float x = (pos[0].X() + pos[1].X()) * 0.5f;
+    const float z = (pos[0].Z() + pos[1].Z()) * 0.5f;
+    return {std::clamp(toIntFloor(x * InvLandGrid), 0, LandRange - 1),
+            std::clamp(toIntFloor(z * InvLandGrid), 0, LandRange - 1)};
+}
+} // namespace
+
+void RoadNet::BuildWayIndices()
+{
+    std::vector<RoadWayBounds> bounds;
+    bounds.reserve(_wayMeshes.size());
+    for (const auto& mesh : _wayMeshes)
+        bounds.push_back({mesh->Min().X(), mesh->Min().Z(), mesh->Max().X(), mesh->Max().Z()});
+    _wayMeshIndex.Build(bounds);
+
+    bounds.clear();
+    bounds.reserve(_wayMapSegments.size());
+    for (const auto& edge : _wayMapSegments)
+        bounds.push_back(LinkBounds(edge.from, edge.to, edge.width * 0.5f));
+    _wayMapIndex.Build(bounds);
+
+    // Stable sorting retains insertion order within a terrain cell.
+    std::stable_sort(_wayLinks.begin(), _wayLinks.end(), [](const RoadLink* a, const RoadLink* b)
+    {
+        const auto ca = WayLinkCell(a), cb = WayLinkCell(b);
+        return ca.second != cb.second ? ca.second < cb.second : ca.first < cb.first;
+    });
+    bounds.clear();
+    bounds.reserve(_wayLinks.size());
+    for (const auto* link : _wayLinks)
+        bounds.push_back(LinkBounds(link->PosConnections()[0], link->PosConnections()[1],
+                                    link->WayHalfWidth()));
+    _waySurfaceIndex.Build(bounds);
+}
+
 bool RoadNet::WaySurface(float x, float z, float tolerance, Texture** texture) const
 {
-    if (_waySegments.empty())
+    if (_wayLinks.empty())
         return false;
-    const int xx = toIntFloor(x * InvLandGrid);
-    const int zz = toIntFloor(z * InvLandGrid);
-    for (int zi = zz - 1; zi <= zz + 1; ++zi)
-        for (int xi = xx - 1; xi <= xx + 1; ++xi)
+    const float padding = floatMax(tolerance, 0.f);
+    const auto id = _waySurfaceIndex.FindFirst(
+        {x - padding, z - padding, x + padding, z + padding},
+        [&](std::size_t candidate)
         {
-            if (!InRange(xi, zi))
-                continue;
-            const RoadList& roads = _roads(xi, zi);
-            for (int i = 0; i < roads.Size(); ++i)
-            {
-                const RoadLink* link = roads[i];
-                if (!link->IsWay())
-                    continue;
-                if (link->IsInside(Vector3(x, 0, z), tolerance))
-                {
-                    if (texture)
-                        *texture = link->WayTexture();
-                    return true;
-                }
-            }
-        }
-    return false;
+            return _wayLinks[candidate]->IsInside(Vector3(x, 0, z), tolerance);
+        });
+    if (id == RoadWaySpatialIndex::NotFound)
+        return false;
+    if (texture)
+        *texture = _wayLinks[id]->WayTexture();
+    return true;
 }
 
+// A 1cm spatial hash replaces the previous full terrain-cell scans.
+// Keep the exact distance check: adjacent hash bins are not junctions
+// unless their endpoints actually match within the original tolerance.
+void RoadNet::ConnectWayEndpoints(const std::vector<RoadLink*>& links)
+{
+    using Cell = std::uint64_t;
+    const auto key = [](std::int64_t x, std::int64_t z) -> Cell
+    {
+        return (static_cast<Cell>(static_cast<std::uint32_t>(x)) << 32) |
+            static_cast<std::uint32_t>(z);
+    };
+    const auto coordinate = [](float value) -> std::int64_t
+    {
+        return static_cast<std::int64_t>(std::floor(static_cast<double>(value) * 100.0));
+    };
+    std::unordered_map<Cell, std::vector<std::size_t>> endpoints;
+    endpoints.reserve(links.size());
+    for (std::size_t i = 0; i < links.size(); ++i)
+        for (int end = 0; end < 2; ++end)
+        {
+            const auto& p = links[i]->PosConnections()[end];
+            endpoints[key(coordinate(p.X()), coordinate(p.Z()))].push_back(i * 2 + end);
+        }
 
-// At a shared OSM node more than two road edges may meet. Legacy connection
-// slots hold one neighbour per endpoint, so add extra slots for each additional
-// branch without inserting junction P3D models.
+    std::vector<std::size_t> nearby;
+    for (std::size_t i = 0; i < links.size(); ++i)
+    {
+        auto* link = links[i];
+        for (int end = 0; end < 2; ++end)
+        {
+            const Vector3 p = link->PosConnections()[end];
+            const auto x = coordinate(p.X()), z = coordinate(p.Z());
+            nearby.clear();
+            for (int dx = -1; dx <= 1; ++dx)
+                for (int dz = -1; dz <= 1; ++dz)
+                {
+                    auto it = endpoints.find(key(x + dx, z + dz));
+                    if (it == endpoints.end())
+                        continue;
+                    for (auto otherEnd : it->second)
+                    {
+                        const auto j = otherEnd / 2;
+                        if (j != i &&
+                            (p - links[j]->PosConnections()[otherEnd % 2]).SquareSizeXZ() < 0.01f * 0.01f)
+                            nearby.push_back(j);
+                    }
+                }
+            std::sort(nearby.begin(), nearby.end());
+            nearby.erase(std::unique(nearby.begin(), nearby.end()), nearby.end());
+            for (auto j : nearby)
+            {
+                auto* other = links[j];
+                bool aToB = false, bToA = false;
+                for (int k = 0; k < link->NConnections(); ++k)
+                    aToB |= link->Connections()[k] == other;
+                for (int k = 0; k < other->NConnections(); ++k)
+                    bToA |= other->Connections()[k] == link;
+                if ((!aToB && link->NConnections() >= link->MaxConnections()) ||
+                    (!bToA && other->NConnections() >= other->MaxConnections()))
+                    continue;
+                if (!aToB)
+                    link->AddConnection(p, other);
+                if (!bToA)
+                    other->AddConnection(p, link);
+            }
+        }
+    }
+}
+
 void RoadNet::ConnectWayJunctions()
 {
-    if (_waySegments.empty())
+    if (_wayLinks.empty())
         return;
-    for (int x = 0; x < LandRange; ++x)
-        for (int z = 0; z < LandRange; ++z)
-        {
-            const RoadList& list = _roads(x, z);
-            for (int i = 0; i < list.Size(); ++i)
-            {
-                RoadLink* link = list[i];
-                if (!link->IsWay())
-                    continue;
-                for (int end = 0; end < 2; ++end)
-                {
-                    const Vector3 p = link->PosConnections()[end];
-                    for (int xx = x - 1; xx <= x + 1; ++xx)
-                        for (int zz = z - 1; zz <= z + 1; ++zz)
-                        {
-                            if (!InRange(xx, zz))
-                                continue;
-                            const RoadList& near = _roads(xx, zz);
-                            for (int j = 0; j < near.Size(); ++j)
-                            {
-                                RoadLink* other = near[j];
-                                if (other == link || !other->IsWay())
-                                    continue;
-                                bool sameNode = false;
-                                for (int k = 0; k < 2; ++k)
-                                    if ((p - other->PosConnections()[k]).SquareSizeXZ() < 0.01f * 0.01f)
-                                        sameNode = true;
-                                if (!sameNode)
-                                    continue;
-                                bool aToB = false, bToA = false;
-                                for (int k = 0; k < link->NConnections(); ++k)
-                                    aToB |= link->Connections()[k] == other;
-                                for (int k = 0; k < other->NConnections(); ++k)
-                                    bToA |= other->Connections()[k] == link;
-                                if ((!aToB && link->NConnections() >= link->MaxConnections()) ||
-                                    (!bToA && other->NConnections() >= other->MaxConnections()))
-                                    continue;
-                                if (!aToB)
-                                    link->AddConnection(p, other);
-                                if (!bToA)
-                                    other->AddConnection(p, link);
-                            }
-                        }
-                }
-            }
-        }
+    // Preserve the legacy cell iteration order as far as possible when
+    // several branches compete for a fixed number of connection slots.
+    std::stable_sort(_wayLinks.begin(), _wayLinks.end(), [](const RoadLink* a, const RoadLink* b)
+    {
+        return WayLinkCell(a) < WayLinkCell(b);
+    });
+    ConnectWayEndpoints(_wayLinks);
 }
-
 
 void RoadNet::SampleWayRoute(const RoadPathArray& route, std::vector<Vector3>& goals, float spacing)
 {
@@ -1053,42 +1169,33 @@ void RoadNet::SampleWayRoute(const RoadPathArray& route, std::vector<Vector3>& g
 
 bool RoadNet::GetNearestWayPoint(Vector3Par pos, float maxDistance, Vector3& nearest) const
 {
-    if (_waySegments.empty() || maxDistance <= 0.f)
+    if (_wayLinks.empty() || maxDistance <= 0.f)
         return false;
-    const int xx = toIntFloor(pos.X() * InvLandGrid);
-    const int zz = toIntFloor(pos.Z() * InvLandGrid);
-    const int cellRadius = std::max(1, static_cast<int>(std::ceil(maxDistance * InvLandGrid)) + 1);
+    const auto candidates = _waySurfaceIndex.Query({
+        pos.X() - maxDistance, pos.Z() - maxDistance,
+        pos.X() + maxDistance, pos.Z() + maxDistance});
     float bestDist2 = Square(maxDistance);
     bool found = false;
-    for (int z = zz - cellRadius; z <= zz + cellRadius; ++z)
-        for (int x = xx - cellRadius; x <= xx + cellRadius; ++x)
+    for (auto id : candidates)
+    {
+        const auto* link = _wayLinks[id];
+        const Vector3& from = link->PosConnections()[0];
+        const Vector3& to = link->PosConnections()[1];
+        const float dx = to.X() - from.X(), dz = to.Z() - from.Z();
+        const float len2 = dx * dx + dz * dz;
+        if (len2 < 1e-6f)
+            continue;
+        const float t = std::clamp(((pos.X() - from.X()) * dx +
+            (pos.Z() - from.Z()) * dz) / len2, 0.f, 1.f);
+        const Vector3 p = from + (to - from) * t;
+        const float dist2 = (p - pos).SquareSizeXZ();
+        if (dist2 < bestDist2)
         {
-            if (!InRange(x, z))
-                continue;
-            const RoadList& roads = _roads(x, z);
-            for (int i = 0; i < roads.Size(); ++i)
-            {
-                const RoadLink* link = roads[i];
-                if (!link->IsWay())
-                    continue;
-                const Vector3& from = link->PosConnections()[0];
-                const Vector3& to = link->PosConnections()[1];
-                const float dx = to.X() - from.X(), dz = to.Z() - from.Z();
-                const float len2 = dx * dx + dz * dz;
-                if (len2 < 1e-6f)
-                    continue;
-                const float t = std::clamp(((pos.X() - from.X()) * dx +
-                    (pos.Z() - from.Z()) * dz) / len2, 0.f, 1.f);
-                const Vector3 p = from + (to - from) * t;
-                const float dist2 = (p - pos).SquareSizeXZ();
-                if (dist2 < bestDist2)
-                {
-                    bestDist2 = dist2;
-                    nearest = p;
-                    found = true;
-                }
-            }
+            bestDist2 = dist2;
+            nearest = p;
+            found = true;
         }
+    }
     return found;
 }
 
@@ -1128,19 +1235,9 @@ void RoadNet::RefreshWayHeights(Landscape* land)
 
     // Existing RoadLinks store positions by value, including extra branch
     // junction slots. Keep every pointer stable while updating heights.
-    for (int x = 0; x < LandRange; ++x)
-        for (int z = 0; z < LandRange; ++z)
-        {
-            RoadList& list = _roads(x, z);
-            for (int i = 0; i < list.Size(); ++i)
-            {
-                RoadLink* link = list[i];
-                if (!link->IsWay())
-                    continue;
-                // Link endpoints, including added intersection slots.
-                link->UpdateWayHeights(land);
-            }
-        }
+    // X/Z bounds are immutable, so no spatial index rebuild is necessary.
+    for (auto* link : _wayLinks)
+        link->UpdateWayHeights(land);
 }
 
 bool RoadNet::IsBuiltFor(const Landscape* land) const

@@ -2,6 +2,7 @@
 #include <catch2/catch_approx.hpp>
 #include <cmath>
 #include <Poseidon/World/Terrain/Roads.hpp>
+#include <Poseidon/World/Terrain/RoadIndexedHeap.hpp>
 #include <Poseidon/Graphics/Dummy/TextureDummy.hpp>
 
 using namespace Poseidon;
@@ -232,4 +233,93 @@ TEST_CASE("Native way parser retains individual record safety guards", "[World][
         way += " 1";
     REQUIRE_FALSE(RoadNet::ValidateWayDefinitions(way));
     REQUIRE_FALSE(RoadNet::ValidateWayDefinitions("way 1 51 road.paa 1 2\n"));
+}
+
+
+TEST_CASE("Road spatial index matches brute-force bounds in source order", "[World][RoadWays][Performance]")
+{
+    RoadWaySpatialIndex index;
+    std::vector<RoadWayBounds> bounds;
+    for (int i = 0; i < 2000; ++i)
+    {
+        const float x = static_cast<float>((i * 97) % 200);
+        const float z = static_cast<float>((i * 31) % 170);
+        bounds.push_back({x, z, x + 3, z + 8});
+    }
+    index.Build(bounds);
+    for (int i = 0; i < 100; ++i)
+    {
+        const float x = static_cast<float>(i * 2);
+        const RoadWayBounds query{x, x * 0.4f, x + 12, x * 0.4f + 20};
+        std::vector<std::size_t> expected;
+        auto first = RoadWaySpatialIndex::NotFound;
+        for (std::size_t j = 0; j < bounds.size(); ++j)
+            if (bounds[j].Intersects(query))
+            {
+                expected.push_back(j);
+                if (first == RoadWaySpatialIndex::NotFound && j % 3 == 0)
+                    first = j;
+            }
+        REQUIRE(index.Query(query) == expected);
+        REQUIRE(index.FindFirst(query, [](std::size_t id) { return id % 3 == 0; }) == first);
+    }
+    const auto all = index.Query({-10, -10, 1000, 1000});
+    REQUIRE(all.size() == bounds.size());
+    REQUIRE(std::is_sorted(all.begin(), all.end()));
+    index.Clear();
+    REQUIRE(index.Query({-10, -10, 1000, 1000}).empty());
+    REQUIRE(index.FindFirst({-10, -10, 1000, 1000}, [](std::size_t) { return true; })
+        == RoadWaySpatialIndex::NotFound);
+}
+
+TEST_CASE("Indexed junction matching preserves exact shared nodes", "[World][RoadWays][Performance]")
+{
+    RoadLink a(Vector3(0, 0, 0), Vector3(20.009f, 0, 20), 6.f, nullptr);
+    RoadLink b(Vector3(20.011f, 0, 20), Vector3(40, 0, 20), 6.f, nullptr);
+    RoadLink c(Vector3(20.009f, 0, 20), Vector3(20, 0, 40), 6.f, nullptr);
+    RoadLink nearby(Vector3(20.03f, 0, 20), Vector3(40, 0, 40), 6.f, nullptr);
+    RoadNet::ConnectWayEndpoints({&a, &b, &c, &nearby});
+    const auto connected = [](const RoadLink& link, const RoadLink* other)
+    {
+        for (int i = 0; i < link.NConnections(); ++i)
+            if (link.Connections()[i] == other)
+                return true;
+        return false;
+    };
+    REQUIRE(connected(a, &b));
+    REQUIRE(connected(b, &a));
+    REQUIRE(connected(a, &c));
+    REQUIRE(connected(b, &c));
+    REQUIRE_FALSE(connected(a, &nearby));
+    REQUIRE_FALSE(connected(nearby, &a));
+    const int count = a.NConnections();
+    RoadNet::ConnectWayEndpoints({&a, &b, &c, &nearby});
+    REQUIRE(a.NConnections() == count);
+}
+
+TEST_CASE("Indexed road open heap supports decrease key after swaps", "[World][RoadWays][Performance]")
+{
+    struct Node
+    {
+        int cost;
+        std::size_t heapIndex = static_cast<std::size_t>(-1);
+        bool operator<(const Node& b) const {return cost < b.cost;}
+        bool operator<=(const Node& b) const {return cost <= b.cost;}
+    };
+    Node a{10}, b{20}, c{30}, d{40};
+    RoadIndexedHeap<Node> heap;
+    heap.HeapInsert(&a);
+    heap.HeapInsert(&b);
+    heap.HeapInsert(&c);
+    heap.HeapInsert(&d);
+    d.cost = 5;
+    heap.HeapUpdateUp(&d);
+    Node* node = nullptr;
+    REQUIRE(heap.HeapRemoveFirst(node)); REQUIRE(node == &d);
+    c.cost = 1;
+    heap.HeapUpdateUp(&c);
+    REQUIRE(heap.HeapRemoveFirst(node)); REQUIRE(node == &c);
+    REQUIRE(heap.HeapRemoveFirst(node)); REQUIRE(node == &a);
+    REQUIRE(heap.HeapRemoveFirst(node)); REQUIRE(node == &b);
+    REQUIRE_FALSE(heap.HeapRemoveFirst(node));
 }

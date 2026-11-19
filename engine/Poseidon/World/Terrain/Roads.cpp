@@ -2,6 +2,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/Roads.hpp>
+#include <Poseidon/World/Terrain/RoadIndexedHeap.hpp>
 #include <float.h>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array2D.hpp>
@@ -11,6 +12,7 @@
 #include <Poseidon/Foundation/Memory/MemAlloc.hpp>
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <unordered_map>
 
 namespace Poseidon
@@ -105,6 +107,11 @@ void RoadNet::Scan(Landscape* land)
     // Array2D::Dim preserves old elements when dimensions match! A rebuild
     // otherwise keeps dead/duplicate SRef<RoadLink> objects and cross-links
     // them to new ways, eventually corrupting AI road traversal.
+    // Invalidate non-owning native indices before destroying their links.
+    _wayLinks.clear();
+    _waySurfaceIndex.Clear();
+    _wayMeshIndex.Clear();
+    _wayMapIndex.Clear();
     _roads.Clear();
     _roads.Dim(LandRange, LandRange);
     // insert all road objects into the road list
@@ -482,6 +489,7 @@ struct RoadNode
     float cost;
     float heur;
     bool open;
+    std::size_t heapIndex;
 
     USE_FAST_ALLOCATOR
 };
@@ -498,7 +506,7 @@ bool operator<=(RoadNode& a, RoadNode& b)
     return a.cost + a.heur <= b.cost + b.heur;
 }
 
-typedef HeapArray<RoadNode*, MemAllocSS> RoadOpenList;
+using RoadOpenList = RoadIndexedHeap<RoadNode>;
 
 // Generated ways can create many thousands of road links. Previously every
 // A* successor scanned all visited nodes, giving O(N^2) path lookup cost.
@@ -548,10 +556,6 @@ bool RoadNet::SearchPath(Vector3Par from, Vector3Par to, RoadPathArray& path, fl
 
     RoadNodeContainer container;
     RoadOpenList openList;
-
-    static StaticStorage<RoadNode*> openListStorage;
-    // use static storage to contain typical searches
-    openList.SetStorage(openListStorage.Init(256));
 
     RoadNode *best, *cur;
 
@@ -875,10 +879,27 @@ bool RoadNet::IsLocked(Vector3Par pos, float size) const
 
 void RoadNet::Build(Landscape* land)
 {
+    using Clock = std::chrono::steady_clock;
+    const auto start = Clock::now();
     Scan(land);
+    const auto scanned = Clock::now();
     LoadWays(land);
+    const auto loaded = Clock::now();
     Connect();
     ConnectWayJunctions();
+    const auto connected = Clock::now();
+    BuildWayIndices();
+    const auto indexed = Clock::now();
+    if (HasWays())
+    {
+        const auto ms = [](auto from, auto to)
+        {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(to - from).count();
+        };
+        LOG_INFO(World, "Native roads: {} links, {} meshes, {} map edges; scan={} ms, load={} ms, connect={} ms, index={} ms",
+                 _wayLinks.size(), _wayMeshes.size(), _wayMapSegments.size(),
+                 ms(start, scanned), ms(scanned, loaded), ms(loaded, connected), ms(connected, indexed));
+    }
     Optimize();
     Compact();
     _builtForLandscape = land;

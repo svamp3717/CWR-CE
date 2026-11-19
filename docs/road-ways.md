@@ -193,3 +193,30 @@ Existing worlds with no `.ways` file retain their original P3D road system.
 The production-tested procedural road/AI code is preserved; this branch is
 primarily a source reorganization and still needs a full build and in-game
 regression test.
+
+
+## Large-network performance
+
+The performance branch keeps the original .ways format, donor/default
+widths, detailed render vertices and terrain/contact sampling. It adds:
+
+* Direct connection of consecutive generated links, plus a 1 cm spatial
+  endpoint hash for native junctions. The existing legacy P3D connection
+  pass continues to handle bridge approaches and old maps.
+* Static X/Z bounding-volume indices for 3D road meshes, 2D map edges and
+  road footprints. Rendering candidates retain their original draw order
+  (important for alpha-blended donor bands); contact selection retains
+  terrain-cell and insertion priority. Off-view geometry is not scanned
+  each frame.
+* A road-specific indexed A* heap with logarithmic decrease-key, retaining
+  the existing route graph, search budget and tie handling.
+* Per-source donor appearance and per-texture surface-material caches,
+  shared endpoint height samples, and height refresh over native links
+  rather than all terrain cells.
+
+Indices rebuild when the network loads, not during rendering or physics
+queries. Terrain editor height changes leave X/Z bounds valid. No road
+simplification, adaptive mesh density, or navigation-graph compression is
+included in this pass; those are separate, more invasive work requiring
+in-game visual and AI regression checks. Performance gains require
+measurement on representative large maps.

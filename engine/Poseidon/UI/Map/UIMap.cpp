@@ -1815,8 +1815,11 @@ void CStaticMap::DrawGeneratedRoads()
     const float minZ = floatMin(topLeft.Z(), bottomRight.Z());
     const float maxZ = floatMax(topLeft.Z(), bottomRight.Z());
 
-    for (const RoadWayMapSegment& road : GRoadNet->WayMapSegments())
+    const auto candidates = GRoadNet->QueryWayMapSegments({minX, minZ, maxX, maxZ});
+    const auto& roads = GRoadNet->WayMapSegments();
+    for (auto id : candidates)
     {
+        const RoadWayMapSegment& road = roads[id];
         const float halfWidth = road.width * 0.5f;
         if (floatMax(road.from.X(), road.to.X()) + halfWidth < minX ||
             floatMin(road.from.X(), road.to.X()) - halfWidth > maxX ||

@@ -1719,8 +1719,11 @@ void Landscape::DrawRoadWays(const LandBegEnd& bigRect, Scene& scene)
     const float maxZ = bigRect.zEnd * _landGrid;
     const Matrix4 identity(MIdentity); // ribbons are already world-space
 
-    for (const auto& mesh : GRoadNet->WayMeshes())
+    const auto candidates = GRoadNet->QueryWayMeshes({minX, minZ, maxX, maxZ});
+    const auto& meshes = GRoadNet->WayMeshes();
+    for (auto id : candidates)
     {
+        const auto& mesh = meshes[id];
         const Vector3 min = mesh->Min();
         const Vector3 max = mesh->Max();
         if (max.X() < minX || min.X() > maxX || max.Z() < minZ || min.Z() > maxZ)

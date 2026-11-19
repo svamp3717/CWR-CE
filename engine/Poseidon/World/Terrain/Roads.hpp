@@ -6,6 +6,7 @@
 #include <Poseidon/Foundation/Containers/SmallArray.hpp>
 #include <Poseidon/Foundation/Containers/BigArray.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/RoadWaySpatialIndex.hpp>
 
 #include <Poseidon/Foundation/Containers/Array2D.hpp>
 #include <memory>
@@ -54,6 +55,7 @@ class RoadLink
 	Object *GetObject() const {return _object;}
 	bool IsWay() const {return _wayHalfWidth > 0;}
 	Texture *WayTexture() const {return _wayTexture;}
+	float WayHalfWidth() const {return _wayHalfWidth;}
 	bool IsInside(Vector3Val pos, float size) const;
 	
 	USE_FAST_ALLOCATOR
@@ -129,6 +131,9 @@ class RoadNet: public RefCount
 	Array2D<RoadList> _roads;
 	std::vector<RoadWaySegment> _waySegments;
 	std::vector<RoadWayMapSegment> _wayMapSegments;
+	// Non-owning links; _roads owns them. Indices are rebuilt on map load.
+	std::vector<RoadLink*> _wayLinks;
+	RoadWaySpatialIndex _wayMeshIndex, _wayMapIndex, _waySurfaceIndex;
 	const Landscape *_builtForLandscape = nullptr;
 	std::string _builtForName;
 	std::vector<std::unique_ptr<Shape>> _wayMeshes;
@@ -138,6 +143,7 @@ class RoadNet: public RefCount
 	RoadList &SelectRoadList( float x, float z );
 	void LoadWays(Landscape *land);
 	void ConnectWayJunctions();
+	void BuildWayIndices();
 
 	public:
 	RoadNet();
@@ -158,6 +164,10 @@ class RoadNet: public RefCount
 	const std::vector<std::unique_ptr<Shape>> &WayMeshes() const {return _wayMeshes;}
 	const std::vector<RoadWaySegment> &WaySegments() const {return _waySegments;}
 	const std::vector<RoadWayMapSegment> &WayMapSegments() const {return _wayMapSegments;}
+	std::vector<std::size_t> QueryWayMeshes(const RoadWayBounds &bounds) const {return _wayMeshIndex.Query(bounds);}
+	std::vector<std::size_t> QueryWayMapSegments(const RoadWayBounds &bounds) const {return _wayMapIndex.Query(bounds);}
+	// Complete exact native junctions without scanning neighboring RoadLists.
+	static void ConnectWayEndpoints(const std::vector<RoadLink*> &links);
 
 	bool SearchPath( Vector3Par from, Vector3Par to, RoadPathArray &path, float prec = 0) const;
 	// Reduce fine road links to steering goals without losing road bends.
