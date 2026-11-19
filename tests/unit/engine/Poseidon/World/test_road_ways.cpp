@@ -206,3 +206,30 @@ TEST_CASE("Native stock road lighting hemisphere is retained on terrain-followin
     REQUIRE(stock.Y() == Catch::Approx(-generic.Y()));
     REQUIRE(stock.Z() == Catch::Approx(-generic.Z()));
 }
+
+
+TEST_CASE("Large native way files are not rejected by aggregate record counts", "[World][RoadWays][Parser]")
+{
+    std::string data;
+    for (int i = 1; i <= 100001; ++i)
+        data += "node " + std::to_string(i) + " " + std::to_string(i) + " 10\n";
+    for (int i = 1; i <= 10001; ++i)
+        data += "way " + std::to_string(i) + " 6 road.paa " +
+            std::to_string(i) + " " + std::to_string(i + 1) + "\n";
+    // Also exceed the former total line limit.
+    data.append(100000, '\n');
+    REQUIRE(RoadNet::ValidateWayDefinitions(data));
+    // Check validation still processes records *after* the old limits.
+    data += "node 1 20 30\n";
+    REQUIRE_FALSE(RoadNet::ValidateWayDefinitions(data));
+}
+
+TEST_CASE("Native way parser retains individual record safety guards", "[World][RoadWays][Parser]")
+{
+    REQUIRE_FALSE(RoadNet::ValidateWayDefinitions(std::string(8193, '#')));
+    std::string way = "way 1 6 road.paa";
+    for (int i = 0; i < 4097; ++i)
+        way += " 1";
+    REQUIRE_FALSE(RoadNet::ValidateWayDefinitions(way));
+    REQUIRE_FALSE(RoadNet::ValidateWayDefinitions("way 1 51 road.paa 1 2\n"));
+}

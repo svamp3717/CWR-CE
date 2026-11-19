@@ -123,6 +123,10 @@ void RoadNet::AddWayQuad(Shape& mesh, Poly& face, int previousRow, int nextRow)
 
 namespace
 {
+// A byte budget bounds aggregate parsing work without arbitrarily rejecting
+// detailed road networks by node/way count. Keep in sync with Worldgen.
+constexpr int MaxWayFileBytes = 64 * 1024 * 1024;
+
 struct ParsedWay
 {
     float width;
@@ -139,10 +143,9 @@ bool ReadWayDefinitions(const std::string& data,
 {
     std::istringstream file(data);
     std::string line;
-    size_t lineCount = 0;
     while (std::getline(file, line))
     {
-        if (++lineCount > 200000 || line.size() > 8192)
+        if (line.size() > 8192)
             return false;
         const size_t comment = line.find('#');
         if (comment != std::string::npos)
@@ -159,7 +162,7 @@ bool ReadWayDefinitions(const std::string& data,
             if (!(row >> id >> x >> z) || (row >> extra) ||
                 !std::isfinite(x) || !std::isfinite(z))
                 return false;
-            if (nodes.size() >= 100000 || !nodes.emplace(id, Vector3(x, 0, z)).second)
+            if (!nodes.emplace(id, Vector3(x, 0, z)).second)
                 return false;
         }
         else if (type == "way")
@@ -175,7 +178,7 @@ bool ReadWayDefinitions(const std::string& data,
                     return false;
                 way.nodes.push_back(nodeId);
             }
-            if (!row.eof() || way.nodes.size() < 2 || ways.size() >= 10000)
+            if (!row.eof() || way.nodes.size() < 2)
                 return false;
             ways.push_back(std::move(way));
         }
@@ -590,6 +593,15 @@ void AppendDonorBandMeshes(std::vector<std::unique_ptr<Shape>>& meshes, Landscap
 }
 } // namespace
 
+bool RoadNet::ValidateWayDefinitions(const std::string& data)
+{
+    if (data.empty() || data.size() > static_cast<size_t>(MaxWayFileBytes))
+        return false;
+    std::unordered_map<long long, Vector3> nodes;
+    std::vector<ParsedWay> ways;
+    return ReadWayDefinitions(data, nodes, ways);
+}
+
 void RoadNet::LoadWays(Landscape* land)
 {
     _waySegments.clear();
@@ -613,7 +625,7 @@ void RoadNet::LoadWays(Landscape* land)
     if (file.fail())
         return;
     const int byteCount = file.rest();
-    if (byteCount <= 0 || byteCount > 8 * 1024 * 1024)
+    if (byteCount <= 0 || byteCount > MaxWayFileBytes)
     {
         LOG_WARN(World, "Invalid road way file size: {}", path);
         return;

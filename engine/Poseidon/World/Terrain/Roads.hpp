@@ -167,6 +167,8 @@ class RoadNet: public RefCount
 	// Preserve the donor model's vertex-lighting hemisphere on terrain slopes.
 	static Vector3 WayLitNormal(Vector3Par terrainNormal, bool donorNormalDown);
 	static void AddWayQuad(Shape &mesh, Poly &face, int previousRow, int nextRow);
+	// Check sidecar syntax with the same parser and byte budget as LoadWays.
+	static bool ValidateWayDefinitions(const std::string &data);
 	const RoadLink *IsOnRoad( Vector3Par pos, float size ) const;
 	Vector3 GetNearestRoadPoint( Vector3Par pos ) const;
 	bool GetNearestWayPoint(Vector3Par pos, float maxDistance, Vector3 &nearest) const;

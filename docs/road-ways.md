@@ -27,6 +27,13 @@ Each `way` has an integer ID, a width between 0.5 and 50 metres, the
 node IDs, unknown records, missing references, invalid dimensions, and
 overly large files are rejected or skipped and reported in logs.
 
+Large networks no longer have fixed aggregate node, way or line-count
+limits. The loader accepts sidecars up to 64 MiB, retaining the 8,192-byte
+line limit, 4,096 node references per way and existing terrain/mesh safety
+checks. Actual map size is still constrained by engine memory and road
+network generation cost. Older engine builds retain the previous
+100,000-node / 10,000-way / 8 MiB restrictions.
+
 The third field supports two backwards-compatible forms:
 
 * `donor=data3d\\YOUR_ROAD.p3d` (or just a path ending with `.p3d`):
