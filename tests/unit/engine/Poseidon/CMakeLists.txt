@@ -400,6 +400,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Network/test_ip_ban.cpp
     Network/test_ban_commands.cpp
     Network/test_network_server.cpp
+    Network/test_network_replication_schedule.cpp
     Network/test_mp_join.cpp
     Network/test_master_server.cpp
     Network/test_network_dispatch.cpp

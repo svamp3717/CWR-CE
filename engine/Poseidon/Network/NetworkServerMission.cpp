@@ -1679,7 +1679,8 @@ void NetworkServer::CheckFadeOut()
     // Not applicable to the open-source reimplementation.
 }
 
-void NetworkServer::EstimateBandwidth(NetworkPlayerInfo& pInfo, int nPlayers, int& nMsgMax, int& nBytesMax)
+void NetworkServer::EstimateBandwidth(NetworkPlayerInfo& pInfo, int nPlayers, int& nMsgMax, int& nBytesMax,
+                                      float budgetMilliseconds)
 {
     if (pInfo.dpid == _botClient)
     {
@@ -1726,7 +1727,7 @@ void NetworkServer::EstimateBandwidth(NetworkPlayerInfo& pInfo, int nPlayers, in
             saturate(bandwidth, minBandwidth / (8 * nPlayers), MaxBandwidth / 8);
         }
 
-        nBytesMax = toInt(0.001 * GEngine->GetAvgFrameDuration() * bandwidth);
+        nBytesMax = toInt(0.001 * budgetMilliseconds * bandwidth);
 
         nBytesMax -= nBytes;
         nMsgMax -= nMsg;
@@ -1747,52 +1748,63 @@ void NetworkServer::EstimateBandwidth(NetworkPlayerInfo& pInfo, int nPlayers, in
     }
 }
 
-void NetworkServer::CreateObjectsList(AutoArray<UpdateObjectInfo, MemAllocSA>& objects, NetworkPlayerInfo& pInfo)
+void NetworkServer::PrepareReplicationCandidates(std::vector<NetworkReplicationCandidate>& candidates)
 {
-    // calculate errors and place object in list sorted by error
-    for (int j = 0; j < _objects.Size(); j++)
+    candidates.clear();
+    candidates.reserve(static_cast<std::size_t>(_objects.Size()));
+    // This pass is shared across players. The underlying message reference stays
+    // alive on its owning NetworkObjectInfo, and invalidates on replacement.
+    for (int j = 0; j < _objects.Size(); ++j)
     {
-        NetworkObjectInfo& oInfo = *_objects[j];
-        if (oInfo.owner == pInfo.dpid)
-        {
-            continue; // no updates for local objects
-        }
-
-        // found best object position and calculate error coef
-        Time time = TIME_MIN;
+        NetworkObjectInfo* oInfo = _objects[j];
         NetworkCurrentInfo* best = nullptr;
-        for (int j = NMCUpdateFirst; j < NMCUpdateN; j++)
+        Time time = TIME_MIN;
+        for (int cls = NMCUpdateFirst; cls < NMCUpdateN; ++cls)
         {
-            NetworkCurrentInfo& info = oInfo.current[j];
-            NetworkMessage* msg = info.message;
-            if (msg)
+            NetworkCurrentInfo& info = oInfo->current[cls];
+            if (info.message && info.message->time > time)
             {
-                if (msg->time > time)
-                {
-                    best = &info;
-                    time = msg->time;
-                }
+                best = &info;
+                time = info.message->time;
             }
         }
         if (!best)
-        {
             continue;
-        }
-        Vector3 bestPosition(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+
+        if (oInfo->replicationPositionSource.GetRef() != best->message.GetRef() ||
+            oInfo->replicationPositionType != best->type)
         {
+            oInfo->replicationPositionSource = best->message;
+            oInfo->replicationPositionType = best->type;
+            oInfo->replicationPositionValid = false;
+
+            Vector3 pos(-FLT_MAX, -FLT_MAX, -FLT_MAX);
             NetworkMessageFormat* format = GMsgFormats[best->type];
             NetworkMessageContext ctx(best->message, format, this, best->from, MSG_RECEIVE);
-
             NET_ERROR(dynamic_cast<const IndicesNetworkObject*>(ctx.GetIndices()))
             const IndicesNetworkObject* indices = static_cast<const IndicesNetworkObject*>(ctx.GetIndices());
-
-            if (ctx.IdxTransfer(indices->objectPosition, bestPosition) != TMOK)
+            if (ctx.IdxTransfer(indices->objectPosition, pos) == TMOK)
             {
-                continue;
+                oInfo->replicationPosition = pos;
+                oInfo->replicationPositionValid = true;
             }
         }
+        if (oInfo->replicationPositionValid)
+            candidates.push_back({oInfo, best->type, oInfo->replicationPosition});
+    }
+}
 
-        float errCoef = CalculateErrorCoef(best->type, pInfo.cameraPosition, bestPosition);
+void NetworkServer::CreateObjectsList(AutoArray<UpdateObjectInfo, MemAllocSA>& objects, NetworkPlayerInfo& pInfo,
+                                      const std::vector<NetworkReplicationCandidate>& candidates)
+{
+    // No per-player scanning or decoding of the latest object position.
+    for (const NetworkReplicationCandidate& candidate : candidates)
+    {
+        NetworkObjectInfo& oInfo = *candidate.object;
+        if (oInfo.owner == pInfo.dpid)
+            continue;
+
+        const float errCoef = CalculateErrorCoef(candidate.type, pInfo.cameraPosition, candidate.position);
 
         NetworkPlayerObjectInfo* poInfo = oInfo.CreatePlayerObjectInfo(pInfo.dpid);
 
@@ -1821,6 +1833,11 @@ void NetworkServer::CreateObjectsList(AutoArray<UpdateObjectInfo, MemAllocSA>& o
                 DiagLogF("Object %s %d:%d - first update to %d", NetworkMessageTypeNames[info.type], oInfo.id.creator,
                          oInfo.id.id, pInfo.dpid);
 #endif
+            }
+            else if (info.message.GetRef() == update.lastSentMsg.GetRef())
+            {
+                // Already sent and unchanged: no state difference to recalculate.
+                continue;
             }
             else
             {
@@ -1973,6 +1990,16 @@ void NetworkServer::OnSendStarted(DWORD msgID, const NetworkMessageQueueItem& it
 
 void NetworkServer::SendMessages()
 {
+    // Reliable queues continue to drain every frame. Only routine state
+    // reprioritization is paced, reducing repeated world-state scans.
+    const bool regularDue = _state < NGSPlay ||
+        _replicationCadence.ShouldRun(static_cast<std::uint32_t>(GlobalTickCount()));
+    const float frameMs = GEngine->GetAvgFrameDuration();
+    const float budgetMs = regularDue && _state >= NGSPlay
+        ? floatMax(frameMs, static_cast<float>(_replicationCadence.LastElapsedMs()))
+        : frameMs;
+    std::vector<NetworkReplicationCandidate> candidates;
+    bool candidatesReady = false;
 #if _ENABLE_CHEATS
     // remove statistics info
     static AutoArray<int> texts;
@@ -2014,7 +2041,7 @@ void NetworkServer::SendMessages()
         int nBytes = 0;
         int nMsgMax, nBytesMax;
 
-        EstimateBandwidth(pInfo, nPlayers, nMsgMax, nBytesMax);
+        EstimateBandwidth(pInfo, nPlayers, nMsgMax, nBytesMax, budgetMs);
 
 #if LOG_QUEUE_PROGRESS
         if (pInfo._messageQueue.Size() > 0)
@@ -2104,10 +2131,15 @@ void NetworkServer::SendMessages()
 #endif
 
         // update objects
-        if (_state >= NGSPlay && pInfo.state >= NGSPlay)
+        if (_state >= NGSPlay && pInfo.state >= NGSPlay && regularDue)
         {
-            // update errors of objects
-            CreateObjectsList(objects, pInfo);
+            // Decode and cache once regardless of the number of recipients.
+            if (!candidatesReady)
+            {
+                PrepareReplicationCandidates(candidates);
+                candidatesReady = true;
+            }
+            CreateObjectsList(objects, pInfo, candidates);
 
             // create and send critical updates
 #if ENABLE_CRITICAL_UPDATES

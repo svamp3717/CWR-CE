@@ -6,6 +6,8 @@
 #include <Poseidon/Network/NetworkServerAuth.hpp>
 
 #include <atomic>
+#include <vector>
+#include <Poseidon/Network/NetworkReplicationSchedule.hpp>
 
 // Info about single type of update of network object
 struct NetworkCurrentInfo
@@ -44,6 +46,13 @@ struct NetworkObjectInfo : public RefCount
     // state of last sent updates (for each player)
     RefArray<NetworkPlayerObjectInfo> playerObjects;
 
+    // Position decoding is shared across recipients. A new immutable message
+    // invalidates the cache, not a client's view or update priority.
+    Ref<NetworkMessage> replicationPositionSource;
+    NetworkMessageType replicationPositionType = NMTNone;
+    Vector3 replicationPosition;
+    bool replicationPositionValid = false;
+
     // Find info about network object for given player
     NetworkPlayerObjectInfo* GetPlayerObjectInfo(int player);
     // Create info (register) of new network object for given player
@@ -52,6 +61,14 @@ struct NetworkObjectInfo : public RefCount
     void DeletePlayerObjectInfo(int player);
     // Objects of this type will be allocated quite often
     USE_FAST_ALLOCATOR
+};
+
+// One shared decoded state entry per source object for a replication tick.
+struct NetworkReplicationCandidate
+{
+    NetworkObjectInfo* object;
+    NetworkMessageType type;
+    Vector3 position;
 };
 
 // stores info about integrity question
@@ -452,6 +469,7 @@ class NetworkServer : public NetworkComponent
     AutoArray<NetworkPlayerInfo> _players;
     // list of network objects (actual state)
     RefArray<NetworkObjectInfo> _objects;
+    Poseidon::ReplicationCadence _replicationCadence;
 
     // used to store pending messages
     struct NetPendingMessage
@@ -790,10 +808,14 @@ class NetworkServer : public NetworkComponent
     // Check if fade out players are to kicked off
     void CheckFadeOut();
     // Calculate limits for message sending
-    void EstimateBandwidth(NetworkPlayerInfo& pInfo, int nPlayers, int& nMsgMax, int& nBytesMax);
+    void EstimateBandwidth(NetworkPlayerInfo& pInfo, int nPlayers, int& nMsgMax, int& nBytesMax,
+                           float budgetMilliseconds);
+    // Decode latest object positions once for all players, reusing unchanged messages.
+    void PrepareReplicationCandidates(std::vector<NetworkReplicationCandidate>& candidates);
     // Calculate errors and place object in list sorted by error
     void CreateObjectsList(AutoArray<UpdateObjectInfo, Poseidon::Foundation::MemAllocSA>& objects,
-                           NetworkPlayerInfo& pInfo);
+                           NetworkPlayerInfo& pInfo,
+                           const std::vector<NetworkReplicationCandidate>& candidates);
     // Prepare next object update message to message queue
     bool PrepareNextUpdate(NetworkPlayerInfo& pInfo,
                            AutoArray<UpdateObjectInfo, Poseidon::Foundation::MemAllocSA>& objects, int& next);
