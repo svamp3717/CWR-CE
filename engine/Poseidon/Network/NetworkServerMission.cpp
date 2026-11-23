@@ -1,6 +1,7 @@
 #include <Poseidon/Foundation/Platform/VersionNo.h>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <future>
 #include <memory>
@@ -2044,6 +2045,7 @@ void NetworkServer::SendMessages()
     // by the main network loop to avoid races with object destruction/JIP.
     std::vector<std::unique_ptr<AutoArray<UpdateObjectInfo, MemAllocSA>>> prepared(_players.Size());
     std::vector<std::future<void>> sortJobs(_players.Size());
+    bool workerScheduled = false;
     if (regularDue && _state >= NGSPlay)
     {
         PrepareReplicationCandidates(_replicationCandidates);
@@ -2058,15 +2060,23 @@ void NetworkServer::SendMessages()
 
             // Thread startup is not worthwhile for short lists. Constrain
             // concurrency to one worker to avoid oversubscribing the host.
-            if (objects->Size() >= 512 && _players.Size() > 1 && player == 0)
+            if (objects->Size() >= 512 && _players.Size() > 1 && !workerScheduled)
             {
+                workerScheduled = true;
                 AutoArray<UpdateObjectInfo, MemAllocSA>* data = objects.get();
                 sortJobs[player] = std::async(std::launch::async, [data]()
                 {
                     std::sort(data->Data(), data->Data() + data->Size(),
                         [](const UpdateObjectInfo& a, const UpdateObjectInfo& b)
                         {
-                            return CmpPlayerObjects(&a, &b) < 0;
+                            // NaN error values are deliberately eligible for
+                            // transmission. Give them a deterministic priority
+                            // so std::sort has a strict weak ordering.
+                            const bool aNan = std::isnan(a.error);
+                            const bool bNan = std::isnan(b.error);
+                            if (aNan != bNan)
+                                return aNan;
+                            return a.error > b.error;
                         });
                 });
             }
