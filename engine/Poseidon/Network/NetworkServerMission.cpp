@@ -1861,13 +1861,13 @@ void NetworkServer::CreateObjectsList(AutoArray<UpdateObjectInfo, MemAllocSA>& o
                     {
                         DiagLogF("  - camera [%.0f, %.0f, %.0f]", pInfo.cameraPosition[0], pInfo.cameraPosition[1],
                                  pInfo.cameraPosition[2]);
-                        DiagLogF("  - position [%.0f, %.0f, %.0f] (distance %.0f m)", bestPosition[0], bestPosition[1],
-                                 bestPosition[2], bestPosition.Distance(pInfo.cameraPosition));
+                        DiagLogF("  - position [%.0f, %.0f, %.0f] (distance %.0f m)", candidate.position[0], candidate.position[1],
+                                 candidate.position[2], candidate.position.Distance(pInfo.cameraPosition));
                     }
                     else
                     {
-                        DiagLogF("  - position [%.0f, %.0f, %.0f], no camera position", bestPosition[0],
-                                 bestPosition[1], bestPosition[2]);
+                        DiagLogF("  - position [%.0f, %.0f, %.0f], no camera position", candidate.position[0],
+                                 candidate.position[1], candidate.position[2]);
                     }
                     LogError(info.type, info.from, info.message, pInfo.dpid, update.lastSentMsg);
                 }
