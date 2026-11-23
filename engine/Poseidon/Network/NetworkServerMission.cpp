@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <future>
+#include <memory>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Network/NetworkServerCommon.hpp>
@@ -1953,8 +1955,8 @@ void NetworkServer::CreateObjectsList(AutoArray<UpdateObjectInfo, MemAllocSA>& o
         }
     }
 
-    // sort objects by errors
-    QSort(objects.Data(), objects.Size(), CmpPlayerObjects);
+    // Sorting is performed by SendMessages so that large immutable priority
+    // arrays can be sorted on a worker without touching network/game state.
 }
 
 void NetworkServer::OnSendStarted(DWORD msgID, const NetworkMessageQueueItem& item)
@@ -2003,7 +2005,6 @@ void NetworkServer::SendMessages()
     const float budgetMs = regularDue && _state >= NGSPlay
         ? floatMax(frameMs, static_cast<float>(_replicationCadence.LastElapsedMs()))
         : frameMs;
-    bool candidatesReady = false;
 #if _ENABLE_CHEATS
     // remove statistics info
     static AutoArray<int> texts;
@@ -2035,6 +2036,46 @@ void NetworkServer::SendMessages()
     if (IsDedicatedServer())
     {
         nPlayers++;
+    }
+
+    // Build all per-recipient update priorities on the game thread. Only
+    // sorting the resulting plain value records is delegated to workers.
+    // Transport serialization, message objects and world state remain owned
+    // by the main network loop to avoid races with object destruction/JIP.
+    std::vector<std::unique_ptr<AutoArray<UpdateObjectInfo, MemAllocSA>>> prepared(_players.Size());
+    std::vector<std::future<void>> sortJobs(_players.Size());
+    if (regularDue && _state >= NGSPlay)
+    {
+        PrepareReplicationCandidates(_replicationCandidates);
+        for (int player = 0; player < _players.Size(); ++player)
+        {
+            NetworkPlayerInfo& pInfo = _players[player];
+            if (pInfo.state < NGSPlay)
+                continue;
+
+            auto objects = std::make_unique<AutoArray<UpdateObjectInfo, MemAllocSA>>();
+            CreateObjectsList(*objects, pInfo, _replicationCandidates);
+
+            // Thread startup is not worthwhile for short lists. Constrain
+            // concurrency to one worker to avoid oversubscribing the host.
+            if (objects->Size() >= 512 && _players.Size() > 1 && player == 0)
+            {
+                AutoArray<UpdateObjectInfo, MemAllocSA>* data = objects.get();
+                sortJobs[player] = std::async(std::launch::async, [data]()
+                {
+                    std::sort(data->Data(), data->Data() + data->Size(),
+                        [](const UpdateObjectInfo& a, const UpdateObjectInfo& b)
+                        {
+                            return CmpPlayerObjects(&a, &b) < 0;
+                        });
+                });
+            }
+            else
+            {
+                QSort(objects->Data(), objects->Size(), CmpPlayerObjects);
+            }
+            prepared[player] = std::move(objects);
+        }
     }
 
     for (int i = 0; i < _players.Size(); i++)
@@ -2119,7 +2160,8 @@ void NetworkServer::SendMessages()
         }
 #endif
 
-        AUTO_STATIC_ARRAY(UpdateObjectInfo, objects, 256);
+        AutoArray<UpdateObjectInfo, MemAllocSA> emptyObjects;
+        AutoArray<UpdateObjectInfo, MemAllocSA>& objects = prepared[i] ? *prepared[i] : emptyObjects;
 
 #define ENABLE_CRITICAL_UPDATES 1
 
@@ -2137,13 +2179,10 @@ void NetworkServer::SendMessages()
         // update objects
         if (_state >= NGSPlay && pInfo.state >= NGSPlay && regularDue)
         {
-            // Decode and cache once regardless of the number of recipients.
-            if (!candidatesReady)
-            {
-                PrepareReplicationCandidates(_replicationCandidates);
-                candidatesReady = true;
-            }
-            CreateObjectsList(objects, pInfo, _replicationCandidates);
+            // Workers only reorder immutable error records; finish before
+            // reading the priority list or constructing outgoing packets.
+            if (sortJobs[i].valid())
+                sortJobs[i].get();
 
             // create and send critical updates
 #if ENABLE_CRITICAL_UPDATES
