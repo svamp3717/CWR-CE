@@ -930,6 +930,7 @@ NetworkObjectInfo* NetworkServer::OnObjectCreate(NetworkId& id, int owner, Netwo
         if (info)
         {
             info->owner = owner;
+            _replicationCandidatesDirty = true;
             if (msg && !info->create.message)
             {
                 info->create.type = type;
@@ -945,6 +946,7 @@ NetworkObjectInfo* NetworkServer::OnObjectCreate(NetworkId& id, int owner, Netwo
     NetworkObjectInfo& info = *_objects[index];
     info.id = id;
     info.owner = owner;
+    _replicationCandidatesDirty = true;
     if (msg)
     {
         info.create.type = type;
@@ -992,6 +994,7 @@ NetworkObjectInfo* NetworkServer::OnObjectUpdate(NetworkId& id, int from, Networ
     info.from = from;
     info.type = type;
     info.message = msg;
+    _replicationCandidatesDirty = true;
 
     if (DiagLevel >= 4)
     {
@@ -1022,6 +1025,8 @@ int NetworkServer::PerformObjectDestroy(const NetworkId& id)
                 }
             }
             owner = info->owner;
+            _replicationCandidatesDirty = true;
+            _replicationCandidates.clear();
             _objects.Delete(i);
             break;
         }
@@ -1133,6 +1138,9 @@ int NetworkServer::UpdateObject(NetworkPlayerInfo* pInfo, NetworkObjectInfo* oIn
 
 void NetworkServer::DestroyAllObjects()
 {
+    _replicationCandidatesDirty = true;
+    _replicationCandidates.clear();
+    _replicationCadence.Reset();
     _objects.Clear();
     _pendingMessages.Clear();
     FOR_EACH(NetworkPlayerInfo, player, _players)

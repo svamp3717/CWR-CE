@@ -1750,6 +1750,11 @@ void NetworkServer::EstimateBandwidth(NetworkPlayerInfo& pInfo, int nPlayers, in
 
 void NetworkServer::PrepareReplicationCandidates(std::vector<NetworkReplicationCandidate>& candidates)
 {
+    // Most state updates do not replace the newest object state. Reuse the
+    // decoded candidate set until an object is created, updated or destroyed.
+    if (!_replicationCandidatesDirty)
+        return;
+    _replicationCandidatesDirty = false;
     candidates.clear();
     candidates.reserve(static_cast<std::size_t>(_objects.Size()));
     // This pass is shared across players. The underlying message reference stays
@@ -1998,7 +2003,6 @@ void NetworkServer::SendMessages()
     const float budgetMs = regularDue && _state >= NGSPlay
         ? floatMax(frameMs, static_cast<float>(_replicationCadence.LastElapsedMs()))
         : frameMs;
-    std::vector<NetworkReplicationCandidate> candidates;
     bool candidatesReady = false;
 #if _ENABLE_CHEATS
     // remove statistics info
@@ -2136,10 +2140,10 @@ void NetworkServer::SendMessages()
             // Decode and cache once regardless of the number of recipients.
             if (!candidatesReady)
             {
-                PrepareReplicationCandidates(candidates);
+                PrepareReplicationCandidates(_replicationCandidates);
                 candidatesReady = true;
             }
-            CreateObjectsList(objects, pInfo, candidates);
+            CreateObjectsList(objects, pInfo, _replicationCandidates);
 
             // create and send critical updates
 #if ENABLE_CRITICAL_UPDATES

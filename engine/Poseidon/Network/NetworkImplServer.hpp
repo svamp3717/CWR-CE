@@ -470,6 +470,8 @@ class NetworkServer : public NetworkComponent
     // list of network objects (actual state)
     RefArray<NetworkObjectInfo> _objects;
     Poseidon::ReplicationCadence _replicationCadence;
+    std::vector<NetworkReplicationCandidate> _replicationCandidates;
+    bool _replicationCandidatesDirty = true;
 
     // used to store pending messages
     struct NetPendingMessage
